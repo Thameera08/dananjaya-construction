@@ -61,6 +61,21 @@ by hand first. `npm run build:app` builds without touching the database.
 - Uploaded slips/bills go to a **private** Blob store and are only served through `/api/files`
   to signed-in users.
 
+## Importing an existing project from Excel
+
+**Projects → Import from Excel** (Admin / Estimator) reads a *Project Profit & Loss Tracker*
+workbook (`.xlsx`) with sheets **Quotation Items**, **Project Setup**, **Cost Budget**,
+**Client Payments** and **Expense Ledger**. Columns are found by their header text, and empty
+template rows (RC-002…, EX-007…) are skipped.
+
+1. Choose the file and click **Check workbook**. This shows totals, problems and adjustments, and saves nothing yet.
+2. Click **Import project**. Everything is written in one transaction (all or nothing).
+
+Notes: Item IDs in the Expense Ledger must be BOQ codes (e.g. `GW-005`) to link a cost to an
+item; anything else is imported as a section or site-overhead cost. Lump-sum lines whose
+quantity × rate doesn't equal the quoted value keep the quoted value. Re-importing the same
+project code / quotation number needs an Admin to tick **Replace existing project**.
+
 ## Exports
 
 - `GET /api/projects/:id/quotation-pdf`

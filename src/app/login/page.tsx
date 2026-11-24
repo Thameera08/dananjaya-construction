@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { connection } from "next/server";
 import { count } from "drizzle-orm";
 import { db } from "@/db";
 import { users } from "@/db/schema";
@@ -22,6 +23,7 @@ export default function LoginPage() {
 }
 
 async function LoginGate() {
+  await connection(); // auth() generates random values before touching cookies; render per request
   if (await getCurrentUser()) redirect("/dashboard");
   const [{ n }] = await db.select({ n: count() }).from(users);
   if (n === 0) {

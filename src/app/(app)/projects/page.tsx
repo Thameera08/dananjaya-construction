@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import Link from "next/link";
-import { Plus } from "lucide-react";
+import { FileSpreadsheet, Plus } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
@@ -34,9 +34,14 @@ async function ProjectsContent() {
         description="Quotations, budgets and project accounts."
         actions={
           can(user.role, "createProject") ? (
-            <Link href="/projects/new" className={buttonVariants({ variant: "accent" })}>
-              <Plus /> New project
-            </Link>
+            <>
+              <Link href="/projects/import" className={buttonVariants({ variant: "outline" })}>
+                <FileSpreadsheet /> Import from Excel
+              </Link>
+              <Link href="/projects/new" className={buttonVariants({ variant: "accent" })}>
+                <Plus /> New project
+              </Link>
+            </>
           ) : null
         }
       />
