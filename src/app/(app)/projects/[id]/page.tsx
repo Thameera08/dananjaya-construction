@@ -28,7 +28,7 @@ async function Overview({ params }: { params: Promise<{ id: string }> }) {
   const chart = pnl.rows
     .filter((r) => !r.quotedSales.isZero() || !r.costIncurred.isZero())
     .map((r) => ({
-      name: r.isOverheads ? "Site Overheads" : r.category,
+      name: r.kind === "overheads" ? "Site Overheads" : r.kind === "personal" ? "Personal" : r.kind === "asset" ? "Company assets" : r.category,
       Sales: toNumber(r.quotedSales),
       Budget: toNumber(r.budgetedCost),
       Incurred: toNumber(r.costIncurred),

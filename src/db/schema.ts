@@ -25,7 +25,13 @@ export const invoiceTypeEnum = pgEnum("invoice_type", ["ADVANCE", "PROGRESS", "F
 export const invoiceStatusEnum = pgEnum("invoice_status", ["DRAFT", "ISSUED", "PARTIAL", "PAID"]);
 export const paymentTypeEnum = pgEnum("payment_type", ["ADVANCE", "PROGRESS", "FINAL", "REFUND"]);
 export const paymentMethodEnum = pgEnum("payment_method", ["CASH", "BANK_TRANSFER", "CHEQUE"]);
-export const costTypeEnum = pgEnum("cost_type", ["LABOUR", "SUPPLIER", "SUBCONTRACTOR", "OTHER"]);
+/**
+ * Base cost behaviour. PERSONAL (owner's personal use of project money) and ASSET
+ * (hardware / tools the company keeps) are deducted from project profit but never
+ * charged to a BOQ item.
+ */
+export const costTypeEnum = pgEnum("cost_type", ["LABOUR", "SUPPLIER", "SUBCONTRACTOR", "OTHER", "PERSONAL", "ASSET"]);
+export const loanRecoveryMethodEnum = pgEnum("loan_recovery_method", ["WAGE_DEDUCTION", "CASH"]);
 
 export type UserRole = (typeof userRoleEnum.enumValues)[number];
 export type QuotationStatus = (typeof quotationStatusEnum.enumValues)[number];
@@ -34,6 +40,7 @@ export type InvoiceStatus = (typeof invoiceStatusEnum.enumValues)[number];
 export type PaymentType = (typeof paymentTypeEnum.enumValues)[number];
 export type PaymentMethod = (typeof paymentMethodEnum.enumValues)[number];
 export type CostType = (typeof costTypeEnum.enumValues)[number];
+export type LoanRecoveryMethod = (typeof loanRecoveryMethodEnum.enumValues)[number];
 
 // ───────────────────────────── Tables ─────────────────────────────
 export const users = pgTable("users", {
@@ -182,6 +189,8 @@ export const expenses = pgTable(
     expenseDate: date("expense_date").notNull(),
     workCategory: text("work_category").notNull(),
     costType: costTypeEnum("cost_type").notNull(),
+    /** Custom cost type name (e.g. "Machinery hire"); its behaviour comes from cost_type. */
+    costLabel: text("cost_label"),
     vendorDetails: text("vendor_details").notNull(),
     invoiceRef: text("invoice_ref"),
     dueDate: date("due_date"),
@@ -219,6 +228,67 @@ export const expensePayments = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("expense_payments_expense_idx").on(t.expenseId), check("expense_payments_pos", sql`${t.amount} > 0`)],
+);
+
+/** User-created cost types, each behaving like one of the base cost types. */
+export const expenseTypes = pgTable("expense_types", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull().unique(),
+  baseType: costTypeEnum("base_type").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** User-created work categories for unallocated costs (e.g. "Hardware Items"). */
+export const expenseCategories = pgTable("expense_categories", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull().unique(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Wage advances / loans given to workers. Not a project cost: it's money owed back,
+ * recovered from later wages or repaid in cash. Outstanding loans reduce cash on hand.
+ */
+export const labourLoans = pgTable(
+  "labour_loans",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    loanCode: text("loan_code").notNull(),
+    workerName: text("worker_name").notNull(),
+    loanDate: date("loan_date").notNull(),
+    amount: money("amount").notNull(),
+    paymentMethod: paymentMethodEnum("payment_method").notNull().default("CASH"),
+    notes: text("notes"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("labour_loans_project_code_uq").on(t.projectId, t.loanCode),
+    index("labour_loans_project_idx").on(t.projectId),
+    check("labour_loans_amount_pos", sql`${t.amount} > 0`),
+  ],
+);
+
+export const labourLoanRecoveries = pgTable(
+  "labour_loan_recoveries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    loanId: uuid("loan_id")
+      .notNull()
+      .references(() => labourLoans.id, { onDelete: "cascade" }),
+    recoveryDate: date("recovery_date").notNull(),
+    amount: money("amount").notNull(),
+    method: loanRecoveryMethodEnum("method").notNull(),
+    /** Wage bill the deduction was made from (WAGE_DEDUCTION). */
+    expenseId: uuid("expense_id").references(() => expenses.id, { onDelete: "set null" }),
+    notes: text("notes"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("labour_loan_recoveries_loan_idx").on(t.loanId), check("labour_loan_recoveries_pos", sql`${t.amount} > 0`)],
 );
 
 // ───────────────────────────── Relations ─────────────────────────────
@@ -265,3 +335,6 @@ export type Invoice = typeof invoices.$inferSelect;
 export type ClientPayment = typeof clientPayments.$inferSelect;
 export type Expense = typeof expenses.$inferSelect;
 export type ExpensePayment = typeof expensePayments.$inferSelect;
+export type ExpenseType = typeof expenseTypes.$inferSelect;
+export type LabourLoan = typeof labourLoans.$inferSelect;
+export type LabourLoanRecovery = typeof labourLoanRecoveries.$inferSelect;

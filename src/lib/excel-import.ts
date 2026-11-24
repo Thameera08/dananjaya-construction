@@ -185,6 +185,8 @@ function mapCostType(s: string): CostType | null {
   if (t.startsWith("lab")) return "LABOUR";
   if (t.startsWith("sub")) return "SUBCONTRACTOR";
   if (t.startsWith("sup") || t.startsWith("mat")) return "SUPPLIER";
+  if (t.startsWith("pers")) return "PERSONAL";
+  if (t.startsWith("asset") || t.startsWith("tool") || t.startsWith("equip") || t.startsWith("company")) return "ASSET";
   if (t.startsWith("oth") || t === "") return "OTHER";
   return null;
 }
@@ -442,6 +444,15 @@ export async function parseProjectWorkbook(buf: ArrayBuffer | Buffer): Promise<P
       if (!costType) {
         costType = "OTHER";
         warnings.push(`${where}: cost type not recognised, so it's recorded as Other.`);
+      }
+      // A "Personal" work category is personal use of project money: deducted from profit.
+      if (norm(category) === "personal" && costType !== "PERSONAL") {
+        costType = "PERSONAL";
+        warnings.push(`${where}: category "Personal" is recorded as cost type Personal (deducted from profit).`);
+      }
+      if ((costType === "PERSONAL" || costType === "ASSET") && itemCode) {
+        warnings.push(`${where}: personal / company-asset costs can't be linked to ${itemCode}, so the link was removed.`);
+        itemCode = null;
       }
       const vendor = (k.vendor && text(row.getCell(k.vendor).value)) || "";
       expenses.push({

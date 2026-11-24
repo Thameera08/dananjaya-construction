@@ -1,9 +1,10 @@
 import { Suspense } from "react";
 import Link from "next/link";
-import { HardHat, LogOut } from "lucide-react";
+import { HardHat, LogOut, Menu } from "lucide-react";
 import { logout } from "@/actions/auth";
 import { SidebarLinks } from "@/components/nav";
-import { requireUser } from "@/lib/dal";
+import { Drawer } from "@/components/ui/drawer";
+import { requireUser, type CurrentUser } from "@/lib/dal";
 import { ROLE_LABELS } from "@/lib/constants";
 import { can } from "@/lib/rbac";
 
@@ -11,27 +12,33 @@ import { can } from "@/lib/rbac";
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen">
-      <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col bg-sidebar px-3 py-4 md:flex">
-        <Link href="/dashboard" className="mb-6 flex items-center gap-2 px-3 text-white">
-          <span className="flex size-8 items-center justify-center rounded-md bg-accent">
-            <HardHat className="size-4.5" />
-          </span>
-          <span className="leading-tight">
-            <span className="block text-sm font-semibold">Dananjaya</span>
-            <span className="block text-xs text-sidebar-foreground">Construction · Fit-Out</span>
-          </span>
-        </Link>
+      <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col bg-sidebar px-3 py-5 md:flex">
+        <Brand />
         <Suspense fallback={<div className="px-3 text-xs text-sidebar-foreground">Loading…</div>}>
           <SidebarBody />
         </Suspense>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
-        <Suspense fallback={null}>
+        <Suspense fallback={<div className="h-14 bg-sidebar md:hidden" />}>
           <MobileBar />
         </Suspense>
-        <main className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-6 md:px-8">{children}</main>
+        <main className="mx-auto w-full max-w-[1440px] flex-1 px-4 py-6 md:px-8 md:py-8">{children}</main>
       </div>
     </div>
+  );
+}
+
+function Brand() {
+  return (
+    <Link href="/dashboard" className="mb-7 flex items-center gap-2.5 px-3 text-white">
+      <span className="flex size-9 items-center justify-center rounded-lg bg-gradient-to-br from-amber-400 to-accent shadow-md shadow-black/30">
+        <HardHat className="size-5" />
+      </span>
+      <span className="leading-tight">
+        <span className="block text-sm font-semibold tracking-tight">Dananjaya</span>
+        <span className="block text-[11px] text-sidebar-foreground">Construction · Fit-Out</span>
+      </span>
+    </Link>
   );
 }
 
@@ -46,20 +53,40 @@ async function linksFor() {
   return { user, links };
 }
 
+function initials(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]!.toUpperCase())
+    .join("");
+}
+
+function UserFooter({ user }: { user: CurrentUser }) {
+  return (
+    <div className="mt-auto rounded-xl bg-white/5 p-3">
+      <div className="flex items-center gap-3">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-xs font-semibold text-white">{initials(user.name)}</span>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium text-white">{user.name}</p>
+          <p className="truncate text-[11px] text-sidebar-foreground">{ROLE_LABELS[user.role]}</p>
+        </div>
+      </div>
+      <form action={logout}>
+        <button className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-md border border-white/10 py-1.5 text-xs text-sidebar-foreground transition-colors hover:bg-white/10 hover:text-white">
+          <LogOut className="size-3.5" /> Sign out
+        </button>
+      </form>
+    </div>
+  );
+}
+
 async function SidebarBody() {
   const { user, links } = await linksFor();
   return (
     <>
       <SidebarLinks links={links} />
-      <div className="mt-auto border-t border-white/10 px-3 pt-4">
-        <p className="truncate text-sm font-medium text-white">{user.name}</p>
-        <p className="truncate text-xs text-sidebar-foreground">{ROLE_LABELS[user.role]}</p>
-        <form action={logout}>
-          <button className="mt-3 flex items-center gap-1.5 text-xs text-sidebar-foreground hover:text-white">
-            <LogOut className="size-3.5" /> Sign out
-          </button>
-        </form>
-      </div>
+      <UserFooter user={user} />
     </>
   );
 }
@@ -67,18 +94,25 @@ async function SidebarBody() {
 async function MobileBar() {
   const { user, links } = await linksFor();
   return (
-    <div className="flex items-center gap-3 overflow-x-auto bg-sidebar px-4 py-2 md:hidden">
-      {links.map((l) => (
-        <Link key={l.href} href={l.href} className="text-sm whitespace-nowrap text-sidebar-foreground hover:text-white">
-          {l.label}
-        </Link>
-      ))}
-      <span className="ml-auto truncate text-xs text-sidebar-foreground">{user.name}</span>
-      <form action={logout}>
-        <button className="text-sidebar-foreground hover:text-white" aria-label="Sign out">
-          <LogOut className="size-4" />
-        </button>
-      </form>
+    <div className="sticky top-0 z-30 flex h-14 items-center gap-3 bg-sidebar px-3 md:hidden">
+      <Drawer
+        side="left"
+        trigger={<Menu className="size-5" />}
+        triggerVariant="ghost"
+        triggerSize="icon"
+        triggerClassName="text-white hover:bg-white/10"
+        triggerLabel="Open menu"
+      >
+        <div className="flex h-full flex-col px-3 py-5">
+          <Brand />
+          <SidebarLinks links={links} />
+          <UserFooter user={user} />
+        </div>
+      </Drawer>
+      <Link href="/dashboard" className="text-sm font-semibold text-white">
+        Dananjaya Construction
+      </Link>
+      <span className="ml-auto flex size-8 items-center justify-center rounded-full bg-white/10 text-[11px] font-semibold text-white">{initials(user.name)}</span>
     </div>
   );
 }

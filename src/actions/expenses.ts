@@ -5,12 +5,16 @@ import { z } from "zod";
 import { db } from "@/db";
 import {
   costTypeEnum,
+  expenseCategories,
   expensePayments,
   expenses,
+  expenseTypes,
   paymentMethodEnum,
   projects,
   quotationItems,
+  type CostType,
 } from "@/db/schema";
+import { COST_TYPE_LABELS } from "@/lib/constants";
 import { authorize } from "@/lib/dal";
 import { D, formatLKR, toDb } from "@/lib/money";
 import { isUuid, maxSeq, seqCode, todayLK } from "@/lib/utils";
@@ -32,7 +36,10 @@ const baseFields = {
   expenseDate: isoDate("Date"),
   workCategory: z.string().trim().max(100).optional(),
   quotationItemId: z.string().optional(), // uuid | "UNALLOCATED"
-  costType: z.enum(costTypeEnum.enumValues),
+  /** Cost type as typed/picked: a base label ("Labour") or a custom name ("Machinery hire"). */
+  costTypeName: z.string().trim().max(60).optional(),
+  /** How a NEW custom cost type behaves (ignored for existing names). */
+  costBase: z.enum(costTypeEnum.enumValues).optional(),
   vendorDetails: requiredText("Vendor / details", 300),
   invoiceRef: optionalText(100),
   dueDate: optionalDate,
@@ -47,8 +54,37 @@ const createSchema = z.object({
   receiptBlobUrl: blobUrlField,
 });
 
+/**
+ * Resolve the cost type. Base names map to the enum; other names are custom types that are
+ * looked up (case-insensitive) or created on the fly with the chosen "counts as" behaviour.
+ */
+async function resolveCostType(name: string | undefined, base: CostType | undefined): Promise<{ costType: CostType; costLabel: string | null }> {
+  const n = (name ?? "").trim();
+  if (!n) {
+    if (base) return { costType: base, costLabel: null };
+    throw new UserError("Choose or type a cost type.");
+  }
+  const baseMatch = (Object.entries(COST_TYPE_LABELS) as [CostType, string][]).find(
+    ([k, label]) => label.toLowerCase() === n.toLowerCase() || k.toLowerCase() === n.toLowerCase(),
+  );
+  if (baseMatch) return { costType: baseMatch[0], costLabel: null };
+  const [existing] = await db.select().from(expenseTypes).where(sql`lower(${expenseTypes.name}) = lower(${n})`);
+  if (existing) return { costType: existing.baseType, costLabel: existing.name };
+  if (!base) throw new UserError(`"${n}" is a new cost type: choose what it counts as (project cost, personal or company asset).`);
+  await db.insert(expenseTypes).values({ name: n, baseType: base }).onConflictDoNothing();
+  return { costType: base, costLabel: n };
+}
+
+/** Remember new work categories so they appear in the pick-list next time. */
+async function rememberCategory(name: string) {
+  await db.insert(expenseCategories).values({ name }).onConflictDoNothing();
+}
+
 /** Resolve item + category: a linked BOQ item always dictates the work category. */
-async function resolveAllocation(projectId: string, itemId: string | undefined, category: string | undefined) {
+async function resolveAllocation(projectId: string, itemId: string | undefined, category: string | undefined, costType: CostType) {
+  if (isUuid(itemId) && (costType === "PERSONAL" || costType === "ASSET")) {
+    throw new UserError("Personal and company-asset costs can't be charged to a BOQ item. Choose UNALLOCATED.");
+  }
   if (isUuid(itemId)) {
     const [it] = await db
       .select()
@@ -57,8 +93,10 @@ async function resolveAllocation(projectId: string, itemId: string | undefined, 
     if (!it) throw new UserError("Selected BOQ item does not belong to this project.");
     return { quotationItemId: it.id, workCategory: it.workCategory };
   }
-  if (!category) throw new UserError("Choose a work category for unallocated costs (e.g. Food, Transport).");
-  return { quotationItemId: null, workCategory: category };
+  const cat = category?.trim() || (costType === "PERSONAL" ? "Personal" : costType === "ASSET" ? "Tools & Equipment" : "");
+  if (!cat) throw new UserError("Choose or type a work category for unallocated costs (e.g. Food, Transport).");
+  await rememberCategory(cat);
+  return { quotationItemId: null, workCategory: cat };
 }
 
 /** Same bill entered twice? Push the user to log a disbursement against the original instead. */
@@ -84,7 +122,8 @@ export async function createExpense(projectId: string, _prev: ActionState, fd: F
     const [p] = await db.select({ id: projects.id }).from(projects).where(eq(projects.id, projectId));
     if (!p) throw new UserError("Unknown project");
 
-    const alloc = await resolveAllocation(projectId, d.quotationItemId, d.workCategory);
+    const ct = await resolveCostType(d.costTypeName, d.costBase);
+    const alloc = await resolveAllocation(projectId, d.quotationItemId, d.workCategory, ct.costType);
     await assertNoDuplicateBill(projectId, d.invoiceRef);
     const paid = d.initialPaid ?? "0.00";
     if (D(paid).greaterThan(D(d.totalCost))) {
@@ -101,7 +140,7 @@ export async function createExpense(projectId: string, _prev: ActionState, fd: F
           ...alloc,
           costCode,
           expenseDate: d.expenseDate,
-          costType: d.costType,
+          ...ct,
           vendorDetails: d.vendorDetails,
           invoiceRef: d.invoiceRef,
           dueDate: d.dueDate,
@@ -204,14 +243,15 @@ export async function updateExpense(expenseId: string, _prev: ActionState, fd: F
     if (D(d.totalCost).lessThan(D(e.paidToDate))) {
       throw new UserError(`Total cost can't be below the ${formatLKR(e.paidToDate)} already paid. Reverse a payment first.`);
     }
-    const alloc = await resolveAllocation(e.projectId, d.quotationItemId, d.workCategory);
+    const ct = await resolveCostType(d.costTypeName, d.costBase);
+    const alloc = await resolveAllocation(e.projectId, d.quotationItemId, d.workCategory, ct.costType);
     await assertNoDuplicateBill(e.projectId, d.invoiceRef, e.id);
     await db
       .update(expenses)
       .set({
         ...alloc,
+        ...ct,
         expenseDate: d.expenseDate,
-        costType: d.costType,
         vendorDetails: d.vendorDetails,
         invoiceRef: d.invoiceRef,
         dueDate: d.dueDate,

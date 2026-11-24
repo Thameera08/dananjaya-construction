@@ -3,7 +3,7 @@ import ExcelJS from "exceljs";
 import type { Customer } from "@/db/schema";
 import { COMPANY } from "./company";
 import { COST_TYPE_LABELS, INVOICE_TYPE_LABELS, PAYMENT_METHOD_LABELS, PAYMENT_TYPE_LABELS } from "./constants";
-import { budgetRows, projectSummary, sectionPnl, type ProjectData } from "./finance";
+import { budgetRows, loanRows, projectSummary, sectionPnl, type ProjectData } from "./finance";
 import { D, toNumber } from "./money";
 
 const MONEY = '#,##0.00;[Red]-#,##0.00';
@@ -72,11 +72,17 @@ export async function buildProjectWorkbook(data: ProjectData & { customer: Custo
   kv("Total Budgeted Costs", n(s.profitability.totalBudgeted));
   kv("Expected Gross Profit", s.profitability.expectedGrossProfit ? n(s.profitability.expectedGrossProfit) : null, MONEY, true);
   kv("Expected Gross Margin (%)", pctN(s.profitability.expectedGrossMargin), PCT);
+  kv("Less: Unbudgeted Site Overheads", -n(s.profitability.siteOverheads));
+  kv("Less: Personal Withdrawals", -n(s.profitability.personal));
+  kv("Less: Company Assets (tools & hardware)", -n(s.profitability.companyAssets));
+  kv("Expected Net Profit", s.profitability.expectedNetProfit ? n(s.profitability.expectedNetProfit) : null, MONEY, true);
+  kv("Expected Net Margin (%)", pctN(s.profitability.expectedNetMargin), PCT);
   section("CASH & PAYABLES");
   kv("Total Incurred Costs", n(s.cash.totalIncurred));
   kv("Paid Costs (Cash Outflows)", n(s.cash.totalPaidCosts));
   kv("Outstanding Vendor Payments (A/P)", n(s.cash.accountsPayable));
-  kv("Net Cash Position", n(s.cash.netCashPosition), MONEY, true);
+  kv("Labour Loans Outstanding", n(s.loans.outstanding));
+  kv("Net Cash Position (after loans)", n(s.cash.netCashPosition), MONEY, true);
   kv("Unadjusted Revenue Less Incurred Costs", n(s.cash.unadjustedRevenueLessIncurred));
   sum.addRow([]);
   sum.addRow([
@@ -127,6 +133,14 @@ export async function buildProjectWorkbook(data: ProjectData & { customer: Custo
       b: n(s.profitability.totalBudgeted),
       p: s.profitability.expectedGrossProfit ? n(s.profitability.expectedGrossProfit) : "Pending",
       m: pctN(s.profitability.expectedGrossMargin),
+    }),
+  );
+  ps.addRow({ c: "Less: site overheads, personal & company assets", p: -n(s.profitability.totalDeductions) });
+  boldRow(
+    ps.addRow({
+      c: "EXPECTED NET PROFIT",
+      p: s.profitability.expectedNetProfit ? n(s.profitability.expectedNetProfit) : "Pending",
+      m: pctN(s.profitability.expectedNetMargin),
     }),
   );
 
@@ -192,11 +206,26 @@ export async function buildProjectWorkbook(data: ProjectData & { customer: Custo
     e.addRow({
       id: x.costCode, dt: x.expenseDate, c: x.workCategory,
       it: x.quotationItemId ? (itemsById.get(x.quotationItemId)?.itemCode ?? "") : "UNALLOCATED",
-      t: COST_TYPE_LABELS[x.costType], v: x.vendorDetails, ref: x.invoiceRef ?? "", due: x.dueDate ?? "",
+      t: x.costLabel ?? COST_TYPE_LABELS[x.costType], v: x.vendorDetails, ref: x.invoiceRef ?? "", due: x.dueDate ?? "",
       tot: n(x.totalCost), paid: n(x.paidToDate), un: n(D(x.totalCost).minus(D(x.paidToDate))), cm: x.comments ?? "",
     });
   }
   boldRow(e.addRow({ v: "TOTAL", tot: n(s.cash.totalIncurred), paid: n(s.cash.totalPaidCosts), un: n(s.cash.accountsPayable) }));
+
+  // 5b. Labour loans
+  const ll = sheet(wb, "Labour Loans", [
+    { header: "Loan ID", key: "id", width: 10 },
+    { header: "Date", key: "dt", width: 11 },
+    { header: "Worker", key: "w", width: 26 },
+    { header: "Amount (Rs.)", key: "a", width: 16, fmt: MONEY },
+    { header: "Recovered (Rs.)", key: "r", width: 16, fmt: MONEY },
+    { header: "Outstanding (Rs.)", key: "o", width: 16, fmt: MONEY },
+    { header: "Notes", key: "n", width: 34 },
+  ]);
+  for (const r of loanRows(data.loans ?? [], data.loanRecoveries ?? [])) {
+    ll.addRow({ id: r.loan.loanCode, dt: r.loan.loanDate, w: r.loan.workerName, a: n(r.loan.amount), r: n(r.recovered), o: n(r.outstanding), n: r.loan.notes ?? "" });
+  }
+  boldRow(ll.addRow({ w: "TOTAL", a: n(s.loans.given), r: n(s.loans.recovered), o: n(s.loans.outstanding) }));
 
   // 6. Client Receipts
   const r = sheet(wb, "Client Receipts", [

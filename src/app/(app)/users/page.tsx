@@ -5,6 +5,7 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { PageHeader, PageSkeleton } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Drawer } from "@/components/ui/drawer";
 import { Field, Input, Select } from "@/components/ui/form";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { userRoleEnum } from "@/db/schema";
@@ -58,10 +59,17 @@ async function UsersContent() {
             {list.map((u) => (
               <TR key={u.id} className={u.isActive ? "" : "opacity-60"}>
                 <TD>
-                  <p className="font-medium">
-                    {u.name} {u.id === me.id && <Badge tone="dark">You</Badge>}
-                  </p>
-                  <p className="text-xs text-muted-foreground">{u.email}</p>
+                  <div className="flex items-center gap-3">
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/90 text-xs font-semibold text-white">
+                      {u.name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("")}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="font-medium">
+                        {u.name} {u.id === me.id && <Badge tone="dark">You</Badge>}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground">{u.email}</p>
+                    </div>
+                  </div>
                 </TD>
                 <TD>
                   <ActionForm action={updateUserRole.bind(null, u.id)} className="flex items-center gap-1.5" compact keepValues>
@@ -81,21 +89,20 @@ async function UsersContent() {
                 <TD className="text-xs whitespace-nowrap text-muted-foreground">{formatDate(u.createdAt)}</TD>
                 <TD>
                   <div className="flex items-center justify-end gap-2 whitespace-nowrap">
-                    <details className="relative">
-                      <summary className="inline-flex h-7 cursor-pointer list-none items-center gap-1 rounded-md px-2 text-xs hover:bg-muted">
-                        <KeyRound className="size-3.5" /> Reset password
-                      </summary>
-                      <div className="absolute right-0 z-10 mt-1 w-72 rounded-md border border-border bg-card p-3 shadow-lg">
-                        <ActionForm action={resetUserPassword.bind(null, u.id)}>
-                          <Field label={`New password for ${u.name}`}>
-                            <Input name="password" type="text" minLength={10} required autoComplete="off" />
-                          </Field>
-                          <SubmitButton size="sm" className="mt-2 w-full">
-                            Set password
-                          </SubmitButton>
-                        </ActionForm>
-                      </div>
-                    </details>
+                    <Drawer
+                      trigger={<><KeyRound className="size-3.5" /> Reset password</>}
+                      triggerVariant="ghost"
+                      triggerSize="xs"
+                      title={`Reset password · ${u.name}`}
+                      description="Share the new password with the user securely. They can change it under My Account."
+                    >
+                      <ActionForm action={resetUserPassword.bind(null, u.id)} className="space-y-4">
+                        <Field label="New password" hint="At least 10 characters">
+                          <Input name="password" type="text" minLength={10} required autoComplete="off" />
+                        </Field>
+                        <SubmitButton className="w-full">Set password</SubmitButton>
+                      </ActionForm>
+                    </Drawer>
                     {u.id !== me.id && (
                       <ActionForm
                         action={setUserActive.bind(null, u.id, !u.isActive)}

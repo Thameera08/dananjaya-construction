@@ -8,17 +8,17 @@ export function Table({ className, ...p }: React.TableHTMLAttributes<HTMLTableEl
   );
 }
 export function THead({ className, ...p }: React.HTMLAttributes<HTMLTableSectionElement>) {
-  return <thead className={cn("bg-muted/70 text-xs uppercase tracking-wide text-muted-foreground", className)} {...p} />;
+  return <thead className={cn("bg-muted/60 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground", className)} {...p} />;
 }
 export function TBody(p: React.HTMLAttributes<HTMLTableSectionElement>) {
-  return <tbody {...p} />;
+  return <tbody className="[&>tr]:transition-colors [&>tr:hover]:bg-muted/40" {...p} />;
 }
 export function TR({ className, ...p }: React.HTMLAttributes<HTMLTableRowElement>) {
   return <tr className={cn("border-b border-border last:border-b-0", className)} {...p} />;
 }
 export function TH({ className, ...p }: React.ThHTMLAttributes<HTMLTableCellElement>) {
-  return <th className={cn("px-3 py-2 text-left font-medium whitespace-nowrap", className)} {...p} />;
+  return <th className={cn("px-3 py-2.5 text-left font-semibold whitespace-nowrap", className)} {...p} />;
 }
 export function TD({ className, ...p }: React.TdHTMLAttributes<HTMLTableCellElement>) {
-  return <td className={cn("px-3 py-2 align-top", className)} {...p} />;
+  return <td className={cn("px-3 py-2.5 align-top", className)} {...p} />;
 }

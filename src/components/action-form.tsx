@@ -2,9 +2,11 @@
 
 import { useActionState, useEffect, useRef } from "react";
 import { useFormStatus } from "react-dom";
-import { CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import { AlertCircle, Loader2 } from "lucide-react";
 import type { ActionState } from "@/lib/validation";
 import { Button, type ButtonProps } from "@/components/ui/button";
+import { useDrawer } from "@/components/ui/drawer";
+import { useToast } from "@/components/toaster";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -13,23 +15,35 @@ type Props = {
   className?: string;
   /** Native confirm() prompt before submitting (destructive actions). */
   confirm?: string;
-  /** Hide the inline success/error line (e.g. for compact row buttons). */
+  /** Row buttons: report errors as toasts instead of an inline line. */
   compact?: boolean;
   /** Keep typed values after success (edit forms). Default: reset (create forms). */
   keepValues?: boolean;
 };
 
+/**
+ * Server Action form: success → toast (and closes the enclosing drawer),
+ * errors → inline under the form (or a toast for compact row actions).
+ */
 export function ActionForm({ action, children, className, confirm, compact, keepValues }: Props) {
   const [state, formAction] = useActionState(action, {} as ActionState);
-  const ref = useRef<HTMLFormElement>(null);
+  const toast = useToast();
+  const drawer = useDrawer();
+  const seen = useRef<ActionState | null>(null);
 
   useEffect(() => {
-    if (compact && state.error) window.alert(state.error);
-  }, [state, compact]);
+    if (seen.current === state || (!state.ok && !state.error)) return;
+    seen.current = state;
+    if (state.ok) {
+      toast.success(state.message ?? "Saved");
+      drawer?.close();
+    } else if (state.error && compact) {
+      toast.error(state.error);
+    }
+  }, [state, compact, toast, drawer]);
 
   return (
     <form
-      ref={ref}
       action={formAction}
       className={className}
       onSubmit={(e) => {
@@ -39,27 +53,23 @@ export function ActionForm({ action, children, className, confirm, compact, keep
       onReset={keepValues ? (e) => e.preventDefault() : undefined}
     >
       {children}
-      {!compact && <FormMessage state={state} />}
+      {!compact && <FormError state={state} />}
     </form>
   );
 }
 
+export function FormError({ state }: { state: ActionState }) {
+  if (!state.error) return null;
+  return (
+    <p role="alert" className="mt-3 flex items-start gap-1.5 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger md:col-span-full">
+      <AlertCircle className="mt-0.5 size-4 shrink-0" /> {state.error}
+    </p>
+  );
+}
+
+/** Kept for the login / setup forms that show both outcomes inline. */
 export function FormMessage({ state }: { state: ActionState }) {
-  if (state.error) {
-    return (
-      <p role="alert" className="mt-3 flex items-start gap-1.5 text-sm text-danger">
-        <AlertCircle className="mt-0.5 size-4 shrink-0" /> {state.error}
-      </p>
-    );
-  }
-  if (state.ok && state.message) {
-    return (
-      <p role="status" className="mt-3 flex items-start gap-1.5 text-sm text-success">
-        <CheckCircle2 className="mt-0.5 size-4 shrink-0" /> {state.message}
-      </p>
-    );
-  }
-  return null;
+  return <FormError state={state} />;
 }
 
 export function SubmitButton({ children, className, ...props }: ButtonProps) {

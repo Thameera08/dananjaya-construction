@@ -11,6 +11,7 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Money } from "@/components/money";
 import { Callout, EmptyState, PageSkeleton } from "@/components/page";
 import { buttonVariants } from "@/components/ui/button";
+import { Drawer } from "@/components/ui/drawer";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, Input } from "@/components/ui/form";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
@@ -52,13 +53,13 @@ function Datalists({ categories }: { categories: string[] }) {
 function ItemFields({ item }: { item?: QuotationItem }) {
   return (
     <>
-      <Field label="Work category" className="md:col-span-2">
+      <Field label="Work category" className="sm:col-span-2">
         <Input name="workCategory" list="work-categories" required defaultValue={item?.workCategory} placeholder="e.g. Painting Walls" />
       </Field>
       <Field label="Unit">
         <Input name="unit" list="units" required defaultValue={item?.unit} placeholder="sq. ft." />
       </Field>
-      <Field label="Specification / description" className="md:col-span-3">
+      <Field label="Specification / description" className="sm:col-span-3">
         <Input name="description" required defaultValue={item?.description} />
       </Field>
       <Field label="Quantity">
@@ -153,10 +154,23 @@ async function QuotationContent({ params }: { params: Promise<{ id: string }> })
             <CardTitle>Bill of quantities</CardTitle>
             <CardDescription>{items.filter((i) => i.isActive).length} active line items in {groups.length} work categories</CardDescription>
           </div>
+          {editable && (
+            <Drawer
+              trigger={<><Plus /> Add line item</>}
+              triggerVariant="accent"
+              title="Add BOQ line item"
+              description={`The item ID (${project.projectCode}-001, -002…) and quoted value (quantity × rate) are calculated automatically.`}
+            >
+              <ActionForm action={addQuotationItem.bind(null, id)} className="grid gap-4 sm:grid-cols-3">
+                <ItemFields />
+                <SubmitButton variant="accent" className="sm:col-span-3">Add item</SubmitButton>
+              </ActionForm>
+            </Drawer>
+          )}
         </CardHeader>
         {groups.length === 0 ? (
           <CardContent>
-            <EmptyState title="No BOQ items yet">Add the first line item below.</EmptyState>
+            <EmptyState title="No BOQ items yet">Use &ldquo;Add line item&rdquo; to start the bill of quantities.</EmptyState>
           </CardContent>
         ) : (
           <Table>
@@ -214,22 +228,6 @@ async function QuotationContent({ params }: { params: Promise<{ id: string }> })
         </Card>
       )}
 
-      {editable && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2"><Plus className="size-4" /> Add line item</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ActionForm action={addQuotationItem.bind(null, id)} className="grid gap-4 md:grid-cols-3">
-              <ItemFields />
-              <div className="flex items-end">
-                <SubmitButton variant="accent">Add item</SubmitButton>
-              </div>
-            </ActionForm>
-            <p className="mt-3 text-xs text-muted-foreground">Item IDs ({project.projectCode}-001, -002…) and quoted value (quantity × rate) are calculated automatically.</p>
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 }
@@ -244,31 +242,24 @@ function GroupRows({ g, editable }: { g: ReturnType<typeof groupByCategory>[numb
       {g.rows.map((it) => (
         <TR key={it.id}>
           <TD className="font-mono text-xs">{it.itemCode}</TD>
-          <TD>
-            {it.description}
-            {editable && (
-              <details className="mt-2">
-                <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-xs text-info hover:underline">
-                  <Pencil className="size-3" /> Edit
-                </summary>
-                <ActionForm action={updateQuotationItem.bind(null, it.id)} className="mt-2 grid gap-3 rounded-md border border-border bg-muted/30 p-3 md:grid-cols-3" keepValues>
-                  <ItemFields item={it} />
-                  <div className="flex items-end">
-                    <SubmitButton size="sm">Save {it.itemCode}</SubmitButton>
-                  </div>
-                </ActionForm>
-              </details>
-            )}
-          </TD>
+          <TD>{it.description}</TD>
           <TD className="text-xs">{it.unit}</TD>
           <TD className="num">{formatQty(it.quantity)}</TD>
           <TD className="num"><Money value={it.clientRate} prefix={false} /></TD>
           <TD className="num font-medium"><Money value={it.quotedValue} prefix={false} /></TD>
           {editable && (
-            <TD className="text-right">
-              <ActionForm action={removeQuotationItem.bind(null, it.id)} compact confirm={`Remove ${it.itemCode}?`}>
-                <SubmitButton size="icon" variant="danger-ghost" aria-label={`Remove ${it.itemCode}`}><Trash2 /></SubmitButton>
-              </ActionForm>
+            <TD>
+              <div className="flex justify-end gap-0.5">
+                <Drawer trigger={<Pencil />} triggerVariant="ghost" triggerSize="icon" triggerLabel={`Edit ${it.itemCode}`} title={`Edit ${it.itemCode}`} description={it.workCategory}>
+                  <ActionForm action={updateQuotationItem.bind(null, it.id)} className="grid gap-4 sm:grid-cols-3" keepValues>
+                    <ItemFields item={it} />
+                    <SubmitButton className="sm:col-span-3">Save {it.itemCode}</SubmitButton>
+                  </ActionForm>
+                </Drawer>
+                <ActionForm action={removeQuotationItem.bind(null, it.id)} compact confirm={`Remove ${it.itemCode}?`}>
+                  <SubmitButton size="icon" variant="danger-ghost" aria-label={`Remove ${it.itemCode}`} title={`Remove ${it.itemCode}`}><Trash2 /></SubmitButton>
+                </ActionForm>
+              </div>
             </TD>
           )}
         </TR>
@@ -284,7 +275,7 @@ function GroupRows({ g, editable }: { g: ReturnType<typeof groupByCategory>[numb
 
 function Total({ label, value, strong }: { label: string; value: React.ReactNode; strong?: boolean }) {
   return (
-    <div className={`rounded-lg border p-4 ${strong ? "border-primary bg-primary text-white" : "border-border bg-card"}`}>
+    <div className={`rounded-xl border p-4 shadow-xs ${strong ? "border-primary bg-gradient-to-br from-primary to-[#2b3447] text-white" : "border-border bg-card"}`}>
       <p className={`text-xs font-medium uppercase tracking-wide ${strong ? "text-white/70" : "text-muted-foreground"}`}>{label}</p>
       <p className="mt-1 text-lg font-semibold tabular-nums">{value}</p>
     </div>

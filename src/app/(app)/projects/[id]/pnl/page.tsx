@@ -72,7 +72,7 @@ async function PnlContent({ params }: { params: Promise<{ id: string }> }) {
           </THead>
           <TBody>
             {rows.map((r) => (
-              <TR key={r.category} className={cn(r.isOverheads && "bg-muted/30 italic")}>
+              <TR key={r.category} className={cn(r.isOverheads && "bg-muted/30 italic", r.kind === "personal" && "text-danger", r.kind === "asset" && "text-info")}>
                 <TD className="font-medium">{r.category}</TD>
                 <TD className="num"><Money value={r.quotedSales} prefix={false} /></TD>
                 <TD className="num"><Money value={r.budgetedCost} prefix={false} /></TD>
@@ -117,6 +117,39 @@ async function PnlContent({ params }: { params: Promise<{ id: string }> }) {
         </Table>
       </Card>
 
+      <Card>
+        <CardHeader>
+          <div>
+            <CardTitle>Expected profit after deductions</CardTitle>
+            <CardDescription>Costs outside the BOQ budget come straight off the project&apos;s profit.</CardDescription>
+          </div>
+        </CardHeader>
+        <Table>
+          <TBody>
+            <TR>
+              <TD>Expected gross profit (net contract − budgeted costs)</TD>
+              <TD className="num">{s.profitability.expectedGrossProfit ? <Money value={s.profitability.expectedGrossProfit} /> : pending}</TD>
+            </TR>
+            <TR>
+              <TD className="text-muted-foreground">Less: unbudgeted site overheads (food, transport, misc.)</TD>
+              <TD className="num text-muted-foreground"><Money value={s.profitability.siteOverheads.negated()} /></TD>
+            </TR>
+            <TR>
+              <TD className="text-muted-foreground">Less: personal withdrawals</TD>
+              <TD className="num text-muted-foreground"><Money value={s.profitability.personal.negated()} /></TD>
+            </TR>
+            <TR>
+              <TD className="text-muted-foreground">Less: company assets (tools &amp; hardware kept)</TD>
+              <TD className="num text-muted-foreground"><Money value={s.profitability.companyAssets.negated()} /></TD>
+            </TR>
+            <TR className="bg-primary font-semibold text-white hover:bg-primary">
+              <TD>Expected net profit {s.profitability.expectedNetMargin ? `(${formatPct(s.profitability.expectedNetMargin)})` : ""}</TD>
+              <TD className="num">{s.profitability.expectedNetProfit ? formatLKR(s.profitability.expectedNetProfit) : "Pending"}</TD>
+            </TR>
+          </TBody>
+        </Table>
+      </Card>
+
       <Callout tone="warn" title="Cash Position ≠ Final Net Profit">
         Uncompleted scope, unrecorded bills, and unpaid supplier invoices will affect final project profit. Variance is budget − incurred:
         negative means the section has already spent more than budgeted.
@@ -129,7 +162,7 @@ async function PnlContent({ params }: { params: Promise<{ id: string }> }) {
         <CardContent>
           <MoneyBarChart
             xKey="name"
-            data={rows.map((r) => ({ name: r.isOverheads ? "Site Overheads" : r.category, Budget: toNumber(r.budgetedCost), Incurred: toNumber(r.costIncurred), Paid: toNumber(r.cashPaid) }))}
+            data={rows.map((r) => ({ name: r.kind === "overheads" ? "Site Overheads" : r.kind === "personal" ? "Personal" : r.kind === "asset" ? "Company assets" : r.category, Budget: toNumber(r.budgetedCost), Incurred: toNumber(r.costIncurred), Paid: toNumber(r.cashPaid) }))}
             series={[
               { key: "Budget", label: "Budgeted cost", color: "#d97706" },
               { key: "Incurred", label: "Cost incurred", color: "#b91c1c" },

@@ -18,7 +18,7 @@ export function LoginForm() {
       <Field label="Password" htmlFor="password">
         <Input id="password" name="password" type="password" autoComplete="current-password" required />
       </Field>
-      <SubmitButton className="w-full" variant="accent">
+      <SubmitButton className="h-10 w-full" variant="accent">
         Sign in
       </SubmitButton>
       <FormMessage state={state} />

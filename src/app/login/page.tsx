@@ -7,7 +7,6 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 import { getCurrentUser } from "@/lib/dal";
 import { AuthShell } from "@/components/auth-shell";
-import { PageSkeleton } from "@/components/page";
 import { LoginForm } from "./login-form";
 
 export const metadata = { title: "Sign in" };
@@ -15,7 +14,7 @@ export const metadata = { title: "Sign in" };
 export default function LoginPage() {
   return (
     <AuthShell title="Sign in" subtitle="Use the account your administrator created for you.">
-      <Suspense fallback={<PageSkeleton />}>
+      <Suspense fallback={<FormSkeleton />}>
         <LoginGate />
       </Suspense>
     </AuthShell>
@@ -37,4 +36,14 @@ async function LoginGate() {
     );
   }
   return <LoginForm />;
+}
+
+function FormSkeleton() {
+  return (
+    <div className="space-y-4" aria-busy="true">
+      <div className="skeleton h-9 w-full" />
+      <div className="skeleton h-9 w-full" />
+      <div className="skeleton h-9 w-full" />
+    </div>
+  );
 }

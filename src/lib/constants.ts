@@ -11,9 +11,11 @@ export const DEFAULT_WORK_CATEGORIES = [
 ] as const;
 
 /** Categories for expenses that are not tied to a BOQ section. */
-export const OVERHEAD_CATEGORIES = ["Food", "Transport", "Hardware Deposit", "Misc"] as const;
+export const OVERHEAD_CATEGORIES = ["Food", "Transport", "Hardware Items", "Hardware Deposit", "Personal", "Tools & Equipment", "Misc"] as const;
 
 export const UNALLOCATED_SECTION = "Unallocated / Site Overheads";
+export const PERSONAL_SECTION = "Personal withdrawals";
+export const ASSET_SECTION = "Company assets (tools & hardware)";
 
 export const UNITS = ["sq. ft.", "lot", "pcs", "m", "points", "set"] as const;
 
@@ -47,4 +49,18 @@ export const COST_TYPE_LABELS: Record<CostType, string> = {
   SUPPLIER: "Supplier",
   SUBCONTRACTOR: "Subcontractor",
   OTHER: "Other",
+  PERSONAL: "Personal",
+  ASSET: "Company asset",
 };
+
+/** Short explanation of how each base type affects the books. */
+export const COST_TYPE_HELP: Record<CostType, string> = {
+  LABOUR: "Project cost",
+  SUPPLIER: "Project cost",
+  SUBCONTRACTOR: "Project cost",
+  OTHER: "Project cost",
+  PERSONAL: "Personal use, deducted from profit",
+  ASSET: "Hardware the company keeps, deducted from profit",
+};
+
+export const LOAN_RECOVERY_LABELS = { WAGE_DEDUCTION: "Deducted from wages", CASH: "Repaid in cash" } as const;

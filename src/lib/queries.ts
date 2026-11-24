@@ -6,8 +6,12 @@ import { db } from "@/db";
 import {
   clientPayments,
   customers,
+  expenseCategories,
   expensePayments,
   expenses,
+  expenseTypes,
+  labourLoanRecoveries,
+  labourLoans,
   invoices,
   projects,
   quotationItems,
@@ -19,7 +23,7 @@ import { isUuid } from "./utils";
 /** Everything needed to render any project page — one round-trip batch, deduped per request. */
 export const getProjectData = cache(async (id: string) => {
   if (!isUuid(id)) return null;
-  const [projectRows, items, inv, pays, exps] = await Promise.all([
+  const [projectRows, items, inv, pays, exps, loans, loanRecoveries] = await Promise.all([
     db
       .select({ project: projects, customer: customers })
       .from(projects)
@@ -29,6 +33,13 @@ export const getProjectData = cache(async (id: string) => {
     db.select().from(invoices).where(eq(invoices.projectId, id)).orderBy(asc(invoices.issueDate), asc(invoices.invoiceNumber)),
     db.select().from(clientPayments).where(eq(clientPayments.projectId, id)).orderBy(asc(clientPayments.paymentDate), asc(clientPayments.receiptCode)),
     db.select().from(expenses).where(eq(expenses.projectId, id)).orderBy(asc(expenses.expenseDate), asc(expenses.costCode)),
+    db.select().from(labourLoans).where(eq(labourLoans.projectId, id)).orderBy(asc(labourLoans.loanDate), asc(labourLoans.loanCode)),
+    db
+      .select({ r: labourLoanRecoveries })
+      .from(labourLoanRecoveries)
+      .innerJoin(labourLoans, eq(labourLoanRecoveries.loanId, labourLoans.id))
+      .where(eq(labourLoans.projectId, id))
+      .orderBy(asc(labourLoanRecoveries.recoveryDate), asc(labourLoanRecoveries.createdAt)),
   ]);
   const row = projectRows[0];
   if (!row) return null;
@@ -39,6 +50,8 @@ export const getProjectData = cache(async (id: string) => {
     invoices: inv,
     payments: pays,
     expenses: exps,
+    loans,
+    loanRecoveries: loanRecoveries.map((x) => x.r),
   };
   return data;
 });
@@ -60,7 +73,7 @@ export async function getExpensePayments(expenseIds: string[]) {
 
 /** All projects with raw rows, for the portfolio dashboard. */
 export async function getAllProjectsData(): Promise<(ProjectData & { customer: typeof customers.$inferSelect })[]> {
-  const [rows, items, inv, pays, exps] = await Promise.all([
+  const [rows, items, inv, pays, exps, loans, recs] = await Promise.all([
     db
       .select({ project: projects, customer: customers })
       .from(projects)
@@ -70,6 +83,8 @@ export async function getAllProjectsData(): Promise<(ProjectData & { customer: t
     db.select().from(invoices),
     db.select().from(clientPayments),
     db.select().from(expenses),
+    db.select().from(labourLoans),
+    db.select().from(labourLoanRecoveries),
   ]);
   const by = <T extends { projectId: string }>(list: T[], id: string) => list.filter((x) => x.projectId === id);
   return rows.map(({ project, customer }) => ({
@@ -79,6 +94,8 @@ export async function getAllProjectsData(): Promise<(ProjectData & { customer: t
     invoices: by(inv, project.id),
     payments: by(pays, project.id),
     expenses: by(exps, project.id),
+    loans: by(loans, project.id),
+    loanRecoveries: recs.filter((r) => loans.some((l) => l.id === r.loanId && l.projectId === project.id)),
   }));
 }
 
@@ -98,4 +115,13 @@ export async function listUsers() {
     })
     .from(users)
     .orderBy(asc(users.createdAt));
+}
+
+/** Custom cost types + work categories for the expense form pick-lists. */
+export async function getExpenseLists() {
+  const [types, cats] = await Promise.all([
+    db.select().from(expenseTypes).orderBy(asc(expenseTypes.name)),
+    db.select().from(expenseCategories).orderBy(asc(expenseCategories.name)),
+  ]);
+  return { types, categories: cats.map((c) => c.name) };
 }

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { Paperclip, Loader2, CheckCircle2, X } from "lucide-react";
 import type { ActionState } from "@/lib/validation";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/toaster";
 
 async function uploadFile(file: File, kind: "slips" | "bills"): Promise<string> {
   const fd = new FormData();
@@ -94,6 +95,7 @@ export function AttachButton({
   iconOnly?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const toast = useToast();
   const [pending, start] = useTransition();
   const [busy, setBusy] = useState(false);
   return (
@@ -112,10 +114,11 @@ export function AttachButton({
             const url = await uploadFile(f, kind);
             start(async () => {
               const r = await onAttach(url);
-              if (r.error) window.alert(r.error);
+              if (r.error) toast.error(r.error);
+              else toast.success(r.message ?? "File attached");
             });
           } catch (err) {
-            window.alert((err as Error).message);
+            toast.error((err as Error).message);
           } finally {
             setBusy(false);
           }

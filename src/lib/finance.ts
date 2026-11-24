@@ -3,8 +3,17 @@
  * Excel export show is computed here from DB rows so they can never disagree.
  */
 import type Decimal from "decimal.js";
-import type { ClientPayment, Expense, Invoice, InvoiceStatus, Project, QuotationItem } from "@/db/schema";
-import { UNALLOCATED_SECTION } from "./constants";
+import type {
+  ClientPayment,
+  Expense,
+  Invoice,
+  InvoiceStatus,
+  LabourLoan,
+  LabourLoanRecovery,
+  Project,
+  QuotationItem,
+} from "@/db/schema";
+import { ASSET_SECTION, PERSONAL_SECTION, UNALLOCATED_SECTION } from "./constants";
 import { D, cents, percentOf, ratio, sum } from "./money";
 
 export type ProjectData = {
@@ -13,6 +22,8 @@ export type ProjectData = {
   invoices: Invoice[];
   payments: ClientPayment[];
   expenses: Expense[];
+  loans?: LabourLoan[];
+  loanRecoveries?: LabourLoanRecovery[];
 };
 
 // ───────────────────────── Contract (quotation) ─────────────────────────
@@ -105,8 +116,11 @@ export function budgetProgress(items: QuotationItem[]) {
 }
 
 // ───────────────────────── Section P&L ─────────────────────────
+export type SectionKind = "section" | "overheads" | "personal" | "asset";
 export type SectionRow = {
   category: string;
+  kind: SectionKind;
+  /** True for every non-BOQ row (overheads, personal, assets). */
   isOverheads: boolean;
   quotedSales: Decimal;
   budgetedCost: Decimal;
@@ -122,12 +136,15 @@ export type SectionRow = {
 
 /**
  * Which P&L section an expense belongs to:
+ *  - PERSONAL / ASSET cost types → their own deduction rows
  *  - linked to a BOQ item → that item's category
  *  - unlinked but tagged with a quoted category → that section
  *  - otherwise → "Unallocated / Site Overheads"
  * Every expense lands in exactly one row, so section totals reconcile with the dashboard.
  */
 export function expenseSection(e: Expense, itemsById: Map<string, QuotationItem>, quotedCategories: Set<string>) {
+  if (e.costType === "PERSONAL") return PERSONAL_SECTION;
+  if (e.costType === "ASSET") return ASSET_SECTION;
   if (e.quotationItemId) {
     const it = itemsById.get(e.quotationItemId);
     if (it) return it.workCategory;
@@ -145,13 +162,15 @@ export function sectionPnl(items: QuotationItem[], expenses: Expense[]) {
   const costs = new Map<string, Expense[]>();
   for (const e of expenses) {
     const key = expenseSection(e, itemsById, quoted);
-    if (key !== UNALLOCATED_SECTION && !order.includes(key)) order.push(key); // inactive-item category
+    const special = key === UNALLOCATED_SECTION || key === PERSONAL_SECTION || key === ASSET_SECTION;
+    if (!special && !order.includes(key)) order.push(key); // inactive-item category
     const list = costs.get(key) ?? [];
     list.push(e);
     costs.set(key, list);
   }
 
-  const build = (category: string, isOverheads: boolean): SectionRow => {
+  const build = (category: string, kind: SectionKind): SectionRow => {
+    const isOverheads = kind !== "section";
     const rows = isOverheads ? [] : active.filter((i) => i.workCategory === category);
     const exp = costs.get(category) ?? [];
     const quotedSales = sum(rows, (r) => r.quotedValue);
@@ -162,6 +181,7 @@ export function sectionPnl(items: QuotationItem[], expenses: Expense[]) {
     const expectedProfit = complete ? quotedSales.minus(budgetedCost) : null;
     return {
       category,
+      kind,
       isOverheads,
       quotedSales,
       budgetedCost,
@@ -175,8 +195,10 @@ export function sectionPnl(items: QuotationItem[], expenses: Expense[]) {
     };
   };
 
-  const rows = order.map((c) => build(c, false));
-  rows.push(build(UNALLOCATED_SECTION, true)); // always present
+  const rows = order.map((c) => build(c, "section"));
+  rows.push(build(UNALLOCATED_SECTION, "overheads")); // always present
+  if (costs.has(PERSONAL_SECTION)) rows.push(build(PERSONAL_SECTION, "personal"));
+  if (costs.has(ASSET_SECTION)) rows.push(build(ASSET_SECTION, "asset"));
   const progress = budgetProgress(items);
   const totals = {
     quotedSales: sum(rows, (r) => r.quotedSales),
@@ -230,6 +252,22 @@ export function projectSummary(data: ProjectData, today: string) {
   );
   const expectedGrossProfit = progress.complete ? contract.net.minus(totalBudgeted) : null;
 
+  // Costs that are not in the BOQ budget and therefore come straight off expected profit.
+  const pnl = sectionPnl(data.items, data.expenses);
+  const rowCost = (k: SectionKind) => sum(pnl.rows.filter((r) => r.kind === k), (r) => r.costIncurred);
+  const siteOverheads = rowCost("overheads");
+  const personal = rowCost("personal");
+  const companyAssets = rowCost("asset");
+  const totalDeductions = siteOverheads.plus(personal).plus(companyAssets);
+  const expectedNetProfit = expectedGrossProfit ? expectedGrossProfit.minus(totalDeductions) : null;
+
+  // Labour loans: cash out now, owed back later. Not a cost, but reduces cash on hand.
+  const loans = data.loans ?? [];
+  const recoveries = data.loanRecoveries ?? [];
+  const loansGiven = sum(loans, (l) => l.amount);
+  const loansRecovered = sum(recoveries, (r) => r.amount);
+  const loansOutstanding = loansGiven.minus(loansRecovered);
+
   const totalIncurred = sum(data.expenses, (e) => e.totalCost);
   const totalPaidCosts = sum(data.expenses, (e) => e.paidToDate);
   const unpaid = data.expenses.filter((e) => D(e.totalCost).greaterThan(D(e.paidToDate)));
@@ -249,6 +287,18 @@ export function projectSummary(data: ProjectData, today: string) {
       totalBudgeted,
       expectedGrossProfit,
       expectedGrossMargin: expectedGrossProfit ? ratio(expectedGrossProfit, contract.net) : null,
+      siteOverheads,
+      personal,
+      companyAssets,
+      totalDeductions,
+      expectedNetProfit,
+      expectedNetMargin: expectedNetProfit ? ratio(expectedNetProfit, contract.net) : null,
+    },
+    loans: {
+      count: loans.length,
+      given: loansGiven,
+      recovered: loansRecovered,
+      outstanding: loansOutstanding,
     },
     cash: {
       totalIncurred,
@@ -256,10 +306,21 @@ export function projectSummary(data: ProjectData, today: string) {
       accountsPayable: totalIncurred.minus(totalPaidCosts),
       overduePayables: sum(overduePayables, (e) => D(e.totalCost).minus(D(e.paidToDate))),
       overdueCount: overduePayables.length,
-      netCashPosition: totalReceived.minus(totalPaidCosts),
+      // Cash on hand = receipts − paid costs − labour loans not yet recovered.
+      netCashPosition: totalReceived.minus(totalPaidCosts).minus(loansOutstanding),
       unadjustedRevenueLessIncurred: contract.net.minus(totalIncurred),
     },
   };
 }
 
 export type ProjectSummary = ReturnType<typeof projectSummary>;
+
+// ───────────────────────── Labour loans ─────────────────────────
+export function loanRows(loans: LabourLoan[], recoveries: LabourLoanRecovery[]) {
+  return loans.map((loan) => {
+    const recs = recoveries.filter((r) => r.loanId === loan.id);
+    const recovered = sum(recs, (r) => r.amount);
+    const outstanding = D(loan.amount).minus(recovered);
+    return { loan, recoveries: recs, recovered, outstanding, settled: outstanding.lessThanOrEqualTo(0) };
+  });
+}

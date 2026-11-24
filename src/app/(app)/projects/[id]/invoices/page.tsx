@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { Download, FilePlus2, Send, Trash2, HandCoins } from "lucide-react";
+import { Download, FilePlus2, FileText, HandCoins, Landmark, PiggyBank, Receipt, Scale, Send, Trash2 } from "lucide-react";
 import { createInvoice, deleteInvoice, issueInvoice } from "@/actions/invoices";
 import { attachPaymentSlip, createPayment, deletePayment } from "@/actions/payments";
 import { ActionForm, SubmitButton } from "@/components/action-form";
@@ -11,6 +11,7 @@ import { Callout, EmptyState, PageSkeleton } from "@/components/page";
 import { InvoiceStatusBadge } from "@/components/status";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
+import { Drawer } from "@/components/ui/drawer";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, Input, Select, Textarea } from "@/components/ui/form";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
@@ -50,11 +51,23 @@ async function InvoicesContent({ params }: { params: Promise<{ id: string }> }) 
   return (
     <div className="space-y-6">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <KpiCard label="Net contract value" value={<Money value={s.contract.net} />} />
-        <KpiCard label={`Advance required (${s.contract.advancePercent.toFixed(0)}%)`} value={<Money value={s.contract.advanceRequired} />} sub={<>Outstanding <Money value={s.collections.advanceOutstanding} /></>} tone={s.collections.advanceOutstanding.isZero() ? "good" : "warn"} />
-        <KpiCard label="Total invoiced" value={<Money value={invoiced} />} sub={<>Uninvoiced <Money value={s.contract.net.minus(invoiced)} /></>} />
-        <KpiCard label="Total received" value={<Money value={s.collections.totalReceived} />} />
-        <KpiCard label="Client balance" value={<Money value={s.collections.outstandingClientBalance} />} />
+        <KpiCard label="Net contract value" value={<Money value={s.contract.net} />} icon={<Landmark />} tone="info" />
+        <KpiCard label={`Advance required (${s.contract.advancePercent.toFixed(0)}%)`} value={<Money value={s.contract.advanceRequired} />} sub={<>Outstanding <Money value={s.collections.advanceOutstanding} /></>} tone={s.collections.advanceOutstanding.isZero() ? "good" : "warn"} icon={<Receipt />} />
+        <KpiCard
+          label="Total invoiced"
+          value={<Money value={invoiced} />}
+          sub={<>Uninvoiced <Money value={s.contract.net.minus(invoiced)} /></>}
+          icon={<FileText />}
+          progress={s.contract.net.isZero() ? 0 : invoiced.dividedBy(s.contract.net).times(100).toNumber()}
+        />
+        <KpiCard
+          label="Total received"
+          value={<Money value={s.collections.totalReceived} />}
+          icon={<PiggyBank />}
+          tone="good"
+          progress={s.contract.net.isZero() ? 0 : s.collections.totalReceived.dividedBy(s.contract.net).times(100).toNumber()}
+        />
+        <KpiCard label="Client balance" value={<Money value={s.collections.outstandingClientBalance} />} icon={<Scale />} />
       </div>
 
       <Card>
@@ -63,10 +76,51 @@ async function InvoicesContent({ params }: { params: Promise<{ id: string }> }) 
             <CardTitle>Invoices</CardTitle>
             <CardDescription>Statuses update automatically as receipts are linked.</CardDescription>
           </div>
+          {canInvoice && data.project.status === "APPROVED" && (
+            <Drawer
+              trigger={<><FilePlus2 /> New invoice</>}
+              triggerVariant="accent"
+              title="New invoice"
+              description={
+                <>
+                  Leave the amount blank to auto-calculate. Advance = {formatLKR(s.contract.advanceRequired)}
+                  {hasAdvance ? " (already raised)" : ""}; Final = net contract − receipts = {formatLKR(finalDefault)}.
+                </>
+              }
+            >
+              <ActionForm action={createInvoice.bind(null, id)} className="grid gap-4 sm:grid-cols-2">
+                <Field label="Invoice type" className="sm:col-span-2">
+                  <Select name="invoiceType" defaultValue={hasAdvance ? "PROGRESS" : "ADVANCE"}>
+                    {invoiceTypeEnum.enumValues.map((t) => (
+                      <option key={t} value={t} disabled={t === "ADVANCE" && hasAdvance}>
+                        {INVOICE_TYPE_LABELS[t]}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Issue date">
+                  <Input type="date" name="issueDate" defaultValue={today} required />
+                </Field>
+                <Field label="Due date">
+                  <Input type="date" name="dueDate" />
+                </Field>
+                <Field label="Amount (Rs.)" hint="Optional for advance / final">
+                  <Input name="amount" inputMode="decimal" placeholder="Auto" />
+                </Field>
+                <Field label="or claim % of contract" hint="Progress invoices only">
+                  <Input name="claimPercent" inputMode="decimal" placeholder="e.g. 15" />
+                </Field>
+                <Field label="Notes (printed on the invoice)" className="sm:col-span-2">
+                  <Textarea name="notes" rows={2} />
+                </Field>
+                <SubmitButton variant="accent" className="sm:col-span-2">Create draft invoice</SubmitButton>
+              </ActionForm>
+            </Drawer>
+          )}
         </CardHeader>
         {data.invoices.length === 0 ? (
           <CardContent>
-            <EmptyState title="No invoices yet" />
+            <EmptyState title="No invoices yet">Raise the advance invoice once the quotation is approved.</EmptyState>
           </CardContent>
         ) : (
           <Table>
@@ -124,54 +178,9 @@ async function InvoicesContent({ params }: { params: Promise<{ id: string }> }) 
         )}
       </Card>
 
-      {canInvoice &&
-        (data.project.status !== "APPROVED" ? (
-          <Callout tone="info">Invoices can be raised once the quotation is APPROVED.</Callout>
-        ) : (
-          <Card>
-            <CardHeader>
-              <div>
-                <CardTitle className="flex items-center gap-2"><FilePlus2 className="size-4" /> New invoice</CardTitle>
-                <CardDescription>
-                  Leave the amount blank to auto-calculate: Advance = {formatLKR(s.contract.advanceRequired)}
-                  {hasAdvance ? " (already raised)" : ""} · Final = net contract − receipts = {formatLKR(finalDefault)}.
-                  Progress claims take an amount or a % of the net contract value.
-                </CardDescription>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <ActionForm action={createInvoice.bind(null, id)} className="grid gap-4 md:grid-cols-6">
-                <Field label="Invoice type" className="md:col-span-2">
-                  <Select name="invoiceType" defaultValue={hasAdvance ? "PROGRESS" : "ADVANCE"}>
-                    {invoiceTypeEnum.enumValues.map((t) => (
-                      <option key={t} value={t} disabled={t === "ADVANCE" && hasAdvance}>
-                        {INVOICE_TYPE_LABELS[t]}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="Issue date">
-                  <Input type="date" name="issueDate" defaultValue={today} required />
-                </Field>
-                <Field label="Due date">
-                  <Input type="date" name="dueDate" />
-                </Field>
-                <Field label="Amount (Rs.)" hint="Optional for advance / final">
-                  <Input name="amount" inputMode="decimal" placeholder="Auto" />
-                </Field>
-                <Field label="or claim % of contract" hint="Progress only">
-                  <Input name="claimPercent" inputMode="decimal" placeholder="e.g. 15" />
-                </Field>
-                <Field label="Notes (printed on invoice)" className="md:col-span-5">
-                  <Input name="notes" />
-                </Field>
-                <div className="flex items-end">
-                  <SubmitButton variant="accent" className="w-full">Create draft</SubmitButton>
-                </div>
-              </ActionForm>
-            </CardContent>
-          </Card>
-        ))}
+      {canInvoice && data.project.status !== "APPROVED" && (
+        <Callout tone="info">Invoices can be raised once the quotation is APPROVED.</Callout>
+      )}
 
       <Card>
         <CardHeader>
@@ -179,10 +188,58 @@ async function InvoicesContent({ params }: { params: Promise<{ id: string }> }) 
             <CardTitle>Client receipts ledger</CardTitle>
             <CardDescription>Every incoming payment (RC-xxx). Refunds are recorded as negative receipts.</CardDescription>
           </div>
+          {canReceipt && (
+            <Drawer trigger={<><HandCoins /> Record payment</>} triggerVariant="accent" title="Record client payment" description="Creates the next RC-xxx receipt. Attach the bank slip if you have it.">
+              <ActionForm action={createPayment.bind(null, id)} className="grid gap-4 sm:grid-cols-2">
+                <Field label="Payment date">
+                  <Input type="date" name="paymentDate" defaultValue={today} required />
+                </Field>
+                <Field label="Payment type">
+                  <Select name="paymentType" defaultValue={s.collections.advanceOutstanding.isZero() ? "PROGRESS" : "ADVANCE"}>
+                    {paymentTypeEnum.enumValues.map((t) => (
+                      <option key={t} value={t}>{PAYMENT_TYPE_LABELS[t]}</option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Amount received (Rs.)" hint="For refunds, enter a positive amount">
+                  <Input name="amount" inputMode="decimal" required />
+                </Field>
+                <Field label="Payment method">
+                  <Select name="paymentMethod" defaultValue="BANK_TRANSFER">
+                    {paymentMethodEnum.enumValues.map((m) => (
+                      <option key={m} value={m}>{PAYMENT_METHOD_LABELS[m]}</option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Reference / slip / cheque no.">
+                  <Input name="referenceNo" />
+                </Field>
+                <Field label="Against invoice">
+                  <Select name="invoiceId" defaultValue="">
+                    <option value="">— Not linked —</option>
+                    {data.invoices
+                      .filter((i) => i.status !== "DRAFT")
+                      .map((i) => (
+                        <option key={i.id} value={i.id}>
+                          {i.invoiceNumber} · {INVOICE_TYPE_LABELS[i.invoiceType]} ({i.status})
+                        </option>
+                      ))}
+                  </Select>
+                </Field>
+                <Field label="Bank slip (photo / PDF)" className="sm:col-span-2">
+                  <FileUploadField name="slipBlobUrl" kind="slips" label="Upload slip" />
+                </Field>
+                <Field label="Notes" className="sm:col-span-2">
+                  <Textarea name="notes" rows={2} />
+                </Field>
+                <SubmitButton variant="accent" className="sm:col-span-2">Record receipt</SubmitButton>
+              </ActionForm>
+            </Drawer>
+          )}
         </CardHeader>
         {data.payments.length === 0 ? (
           <CardContent>
-            <EmptyState title="No receipts recorded" />
+            <EmptyState title="No receipts recorded">Use &ldquo;Record payment&rdquo; when the client pays.</EmptyState>
           </CardContent>
         ) : (
           <Table>
@@ -239,61 +296,6 @@ async function InvoicesContent({ params }: { params: Promise<{ id: string }> }) 
         )}
       </Card>
 
-      {canReceipt && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2"><HandCoins className="size-4" /> Record client payment</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ActionForm action={createPayment.bind(null, id)} className="grid gap-4 md:grid-cols-4">
-              <Field label="Payment date">
-                <Input type="date" name="paymentDate" defaultValue={today} required />
-              </Field>
-              <Field label="Payment type">
-                <Select name="paymentType" defaultValue={s.collections.advanceOutstanding.isZero() ? "PROGRESS" : "ADVANCE"}>
-                  {paymentTypeEnum.enumValues.map((t) => (
-                    <option key={t} value={t}>{PAYMENT_TYPE_LABELS[t]}</option>
-                  ))}
-                </Select>
-              </Field>
-              <Field label="Amount received (Rs.)" hint="For refunds, enter a positive amount">
-                <Input name="amount" inputMode="decimal" required />
-              </Field>
-              <Field label="Payment method">
-                <Select name="paymentMethod" defaultValue="BANK_TRANSFER">
-                  {paymentMethodEnum.enumValues.map((m) => (
-                    <option key={m} value={m}>{PAYMENT_METHOD_LABELS[m]}</option>
-                  ))}
-                </Select>
-              </Field>
-              <Field label="Reference / slip / cheque no.">
-                <Input name="referenceNo" />
-              </Field>
-              <Field label="Against invoice">
-                <Select name="invoiceId" defaultValue="">
-                  <option value="">— Not linked —</option>
-                  {data.invoices
-                    .filter((i) => i.status !== "DRAFT")
-                    .map((i) => (
-                      <option key={i.id} value={i.id}>
-                        {i.invoiceNumber} · {INVOICE_TYPE_LABELS[i.invoiceType]} ({i.status})
-                      </option>
-                    ))}
-                </Select>
-              </Field>
-              <Field label="Bank slip (photo / PDF)" className="md:col-span-2">
-                <FileUploadField name="slipBlobUrl" kind="slips" label="Upload slip" />
-              </Field>
-              <Field label="Notes" className="md:col-span-3">
-                <Textarea name="notes" className="min-h-9" rows={1} />
-              </Field>
-              <div className="flex items-end">
-                <SubmitButton variant="accent" className="w-full">Record receipt</SubmitButton>
-              </div>
-            </ActionForm>
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { Lock } from "lucide-react";
+import { Calculator, Lock, Wallet } from "lucide-react";
 import { saveBudget } from "@/actions/budget";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { KpiCard } from "@/components/kpi-card";
@@ -54,13 +54,10 @@ async function BudgetContent({ params }: { params: Promise<{ id: string }> }) {
           label="Cost budget completed"
           value={`${progress.completed} / ${progress.total} items`}
           tone={progress.complete ? "good" : "warn"}
-          sub={
-            <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-muted">
-              <div className="h-full bg-accent" style={{ width: `${progress.total ? (progress.completed / progress.total) * 100 : 0}%` }} />
-            </div>
-          }
+          progress={progress.total ? (progress.completed / progress.total) * 100 : 0}
+          icon={<Calculator />}
         />
-        <KpiCard label="Total budgeted costs" value={<Money value={s.profitability.totalBudgeted} />} />
+        <KpiCard label="Total budgeted costs" value={<Money value={s.profitability.totalBudgeted} />} icon={<Wallet />} />
         <KpiCard label="Expected gross profit" value={s.profitability.expectedGrossProfit ? <Money value={s.profitability.expectedGrossProfit} signTone /> : pending} tone={s.profitability.expectedGrossProfit ? "default" : "muted"} sub="Net contract value − budgeted costs" />
         <KpiCard label="Expected gross margin" value={s.profitability.expectedGrossMargin ? formatPct(s.profitability.expectedGrossMargin) : pending} tone={s.profitability.expectedGrossMargin ? "default" : "muted"} />
       </div>

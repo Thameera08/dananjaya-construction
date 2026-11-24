@@ -14,6 +14,7 @@ import {
   BarChart3,
   Settings,
   Gauge,
+  HandCoins,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -31,11 +32,13 @@ export function SidebarLinks({ links }: { links: { href: string; label: string; 
             key={l.href}
             href={l.href}
             className={cn(
-              "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors",
-              active ? "bg-white/10 font-medium text-white" : "text-sidebar-foreground hover:bg-white/5 hover:text-white",
+              "relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+              active
+                ? "bg-white/10 font-medium text-white before:absolute before:inset-y-1.5 before:-left-3 before:w-1 before:rounded-r before:bg-accent"
+                : "text-sidebar-foreground hover:bg-white/5 hover:text-white",
             )}
           >
-            <Icon className="size-4" /> {l.label}
+            <Icon className={cn("size-4", active && "text-accent")} /> {l.label}
           </Link>
         );
       })}
@@ -49,6 +52,7 @@ const TABS = [
   { seg: "budget", label: "Cost Budget", icon: Calculator },
   { seg: "invoices", label: "Invoices & Receipts", icon: Receipt },
   { seg: "expenses", label: "Expenses", icon: Wallet },
+  { seg: "loans", label: "Labour Loans", icon: HandCoins },
   { seg: "pnl", label: "Section P&L", icon: BarChart3 },
   { seg: "settings", label: "Settings", icon: Settings },
 ];
@@ -58,7 +62,7 @@ export function ProjectTabs() {
   const pathname = usePathname();
   const base = `/projects/${id}`;
   return (
-    <nav className="-mb-px flex gap-1 overflow-x-auto" aria-label="Project sections">
+    <nav className="-mb-px flex gap-0.5 overflow-x-auto" aria-label="Project sections">
       {TABS.map((t) => {
         const href = t.seg ? `${base}/${t.seg}` : base;
         const active = t.seg ? pathname.startsWith(href) : pathname === base;
@@ -67,8 +71,8 @@ export function ProjectTabs() {
             key={t.seg}
             href={href}
             className={cn(
-              "flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm whitespace-nowrap transition-colors",
-              active ? "border-accent font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
+              "flex items-center gap-1.5 border-b-2 px-3 py-3 text-sm whitespace-nowrap transition-colors",
+              active ? "border-accent font-semibold text-foreground [&_svg]:text-accent" : "border-transparent text-muted-foreground hover:border-border hover:text-foreground",
             )}
           >
             <t.icon className="size-4" /> {t.label}
