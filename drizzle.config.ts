@@ -5,8 +5,22 @@ import { defineConfig } from "drizzle-kit";
 config({ path: ".env.local", quiet: true });
 config({ quiet: true });
 
-const url = process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL;
-if (!url) throw new Error("DATABASE_URL_UNPOOLED (or DATABASE_URL) must be set for drizzle-kit");
+// Direct (unpooled) URL first; the Neon integration may also expose POSTGRES_* aliases.
+const url =
+  process.env.DATABASE_URL_UNPOOLED ??
+  process.env.POSTGRES_URL_NON_POOLING ??
+  process.env.DATABASE_URL ??
+  process.env.POSTGRES_URL;
+if (!url) {
+  throw new Error(
+    [
+      "No database URL found for drizzle-kit.",
+      "Set DATABASE_URL_UNPOOLED (direct) and DATABASE_URL (pooled).",
+      "On Vercel: Project → Storage → connect your Neon database (enable Production + Preview),",
+      "or add them under Project → Settings → Environment Variables, then redeploy.",
+    ].join("\n"),
+  );
+}
 
 export default defineConfig({
   schema: "./src/db/schema.ts",

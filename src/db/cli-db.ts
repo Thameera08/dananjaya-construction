@@ -8,7 +8,11 @@ config({ path: ".env.local", quiet: true });
 config({ quiet: true });
 
 export function cliDb() {
-  const url = process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL;
+  const url =
+    process.env.DATABASE_URL_UNPOOLED ??
+    process.env.POSTGRES_URL_NON_POOLING ??
+    process.env.DATABASE_URL ??
+    process.env.POSTGRES_URL;
   if (!url) {
     console.error("✖ DATABASE_URL_UNPOOLED / DATABASE_URL is not set (try `vercel env pull .env.local`).");
     process.exit(1);
