@@ -44,9 +44,10 @@ function Brand() {
 
 async function linksFor() {
   const user = await requireUser();
-  const links: { href: string; label: string; icon: "LayoutDashboard" | "FolderKanban" | "Users" | "UserCircle" }[] = [
+  const links: { href: string; label: string; icon: "LayoutDashboard" | "FolderKanban" | "Package" | "Users" | "UserCircle" }[] = [
     { href: "/dashboard", label: "Dashboard", icon: "LayoutDashboard" },
     { href: "/projects", label: "Projects", icon: "FolderKanban" },
+    { href: "/inventory", label: "Inventory", icon: "Package" },
   ];
   if (can(user.role, "manageUsers")) links.push({ href: "/users", label: "User Accounts", icon: "Users" });
   links.push({ href: "/account", label: "My Account", icon: "UserCircle" });

@@ -15,10 +15,12 @@ import {
   Settings,
   Gauge,
   HandCoins,
+  Package,
+  LineChart,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const ICONS = { LayoutDashboard, FolderKanban, Users, UserCircle };
+const ICONS = { LayoutDashboard, FolderKanban, Package, Users, UserCircle };
 
 export function SidebarLinks({ links }: { links: { href: string; label: string; icon: keyof typeof ICONS }[] }) {
   const pathname = usePathname();
@@ -54,6 +56,7 @@ const TABS = [
   { seg: "expenses", label: "Expenses", icon: Wallet },
   { seg: "loans", label: "Labour Loans", icon: HandCoins },
   { seg: "pnl", label: "Section P&L", icon: BarChart3 },
+  { seg: "analysis", label: "Analysis", icon: LineChart },
   { seg: "settings", label: "Settings", icon: Settings },
 ];
 

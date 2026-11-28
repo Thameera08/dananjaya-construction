@@ -10,6 +10,8 @@ import {
   expensePayments,
   expenses,
   expenseTypes,
+  inventoryItems,
+  stockMovements,
   labourLoanRecoveries,
   labourLoans,
   invoices,
@@ -115,6 +117,22 @@ export async function listUsers() {
     })
     .from(users)
     .orderBy(asc(users.createdAt));
+}
+
+/** All inventory items + every stock movement (small tables: one store). */
+export async function getInventory() {
+  const [items, movements] = await Promise.all([
+    db.select().from(inventoryItems).orderBy(asc(inventoryItems.category), asc(inventoryItems.name)),
+    db.select().from(stockMovements).orderBy(desc(stockMovements.movementDate), desc(stockMovements.createdAt)),
+  ]);
+  return { items, movements };
+}
+
+export async function listProjectsBrief() {
+  return db
+    .select({ id: projects.id, title: projects.title, quotationNumber: projects.quotationNumber })
+    .from(projects)
+    .orderBy(desc(projects.createdAt));
 }
 
 /** Custom cost types + work categories for the expense form pick-lists. */

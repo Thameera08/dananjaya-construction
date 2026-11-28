@@ -32,6 +32,7 @@ export const paymentMethodEnum = pgEnum("payment_method", ["CASH", "BANK_TRANSFE
  */
 export const costTypeEnum = pgEnum("cost_type", ["LABOUR", "SUPPLIER", "SUBCONTRACTOR", "OTHER", "PERSONAL", "ASSET"]);
 export const loanRecoveryMethodEnum = pgEnum("loan_recovery_method", ["WAGE_DEDUCTION", "CASH"]);
+export const stockMovementTypeEnum = pgEnum("stock_movement_type", ["IN", "OUT", "ADJUST"]);
 
 export type UserRole = (typeof userRoleEnum.enumValues)[number];
 export type QuotationStatus = (typeof quotationStatusEnum.enumValues)[number];
@@ -41,6 +42,7 @@ export type PaymentType = (typeof paymentTypeEnum.enumValues)[number];
 export type PaymentMethod = (typeof paymentMethodEnum.enumValues)[number];
 export type CostType = (typeof costTypeEnum.enumValues)[number];
 export type LoanRecoveryMethod = (typeof loanRecoveryMethodEnum.enumValues)[number];
+export type StockMovementType = (typeof stockMovementTypeEnum.enumValues)[number];
 
 // ───────────────────────────── Tables ─────────────────────────────
 export const users = pgTable("users", {
@@ -291,6 +293,57 @@ export const labourLoanRecoveries = pgTable(
   (t) => [index("labour_loan_recoveries_loan_idx").on(t.loanId), check("labour_loan_recoveries_pos", sql`${t.amount} > 0`)],
 );
 
+/** Materials / tools kept in the store (company-wide, shared across projects). */
+export const inventoryItems = pgTable(
+  "inventory_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    itemCode: text("item_code").notNull().unique(),
+    name: text("name").notNull(),
+    category: text("category").notNull().default("General"),
+    unit: text("unit").notNull(),
+    /** Warn when on-hand stock falls to or below this. NULL = no alert. */
+    reorderLevel: numeric("reorder_level", { precision: 14, scale: 3 }),
+    notes: text("notes"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("inventory_items_name_uq").on(sql`lower(${t.name})`)],
+);
+
+/**
+ * Every stock change. quantity is a signed delta: IN > 0, OUT < 0, ADJUST either way.
+ * On-hand = SUM(quantity). OUT rows usually name the project the material went to.
+ */
+export const stockMovements = pgTable(
+  "stock_movements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => inventoryItems.id, { onDelete: "cascade" }),
+    movementDate: date("movement_date").notNull(),
+    movementType: stockMovementTypeEnum("movement_type").notNull(),
+    quantity: numeric("quantity", { precision: 14, scale: 3 }).notNull(),
+    /** Purchase price per unit (IN). Used for the weighted-average stock value. */
+    unitCost: money("unit_cost"),
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+    reference: text("reference"),
+    notes: text("notes"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("stock_movements_item_idx").on(t.itemId),
+    index("stock_movements_project_idx").on(t.projectId),
+    check(
+      "stock_movements_sign",
+      sql`(${t.movementType} = 'IN' AND ${t.quantity} > 0) OR (${t.movementType} = 'OUT' AND ${t.quantity} < 0) OR (${t.movementType} = 'ADJUST' AND ${t.quantity} <> 0)`,
+    ),
+    check("stock_movements_cost_nonneg", sql`${t.unitCost} IS NULL OR ${t.unitCost} >= 0`),
+  ],
+);
+
 // ───────────────────────────── Relations ─────────────────────────────
 export const customersRelations = relations(customers, ({ many }) => ({ projects: many(projects) }));
 
@@ -338,3 +391,5 @@ export type ExpensePayment = typeof expensePayments.$inferSelect;
 export type ExpenseType = typeof expenseTypes.$inferSelect;
 export type LabourLoan = typeof labourLoans.$inferSelect;
 export type LabourLoanRecovery = typeof labourLoanRecoveries.$inferSelect;
+export type InventoryItem = typeof inventoryItems.$inferSelect;
+export type StockMovement = typeof stockMovements.$inferSelect;

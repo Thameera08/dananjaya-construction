@@ -1,8 +1,9 @@
 import "server-only";
+import type Decimal from "decimal.js";
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import type { ClientPayment, Customer, Invoice, Project, QuotationItem } from "@/db/schema";
 import { COMPANY } from "./company";
-import { INVOICE_TYPE_LABELS } from "./constants";
+import { INVOICE_TYPE_LABELS, PAYMENT_METHOD_LABELS, PAYMENT_TYPE_LABELS } from "./constants";
 import { contractTotals, groupByCategory } from "./finance";
 import { D, formatLKR, formatQty, sum } from "./money";
 import { formatDate } from "./utils";
@@ -417,5 +418,211 @@ export async function renderInvoicePdf(
   doc.bankBlock(project);
   doc.y -= 10;
   doc.paragraph("This is a computer-generated invoice.", { size: 8, color: MUTED });
+  return doc.finish();
+}
+
+// ─────────────────────────── Amount in words ───────────────────────────
+const ONES = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
+const TENS = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+
+function under1000(n: number): string {
+  const h = Math.floor(n / 100);
+  const r = n % 100;
+  const parts: string[] = [];
+  if (h) parts.push(`${ONES[h]} Hundred`);
+  if (r) parts.push(r < 20 ? ONES[r] : `${TENS[Math.floor(r / 10)]}${r % 10 ? ` ${ONES[r % 10]}` : ""}`);
+  return parts.join(" and ");
+}
+
+function intToWords(n: number): string {
+  if (n === 0) return "Zero";
+  const scales: [number, string][] = [
+    [1_000_000_000, "Billion"],
+    [1_000_000, "Million"],
+    [1_000, "Thousand"],
+  ];
+  const parts: string[] = [];
+  for (const [v, name] of scales) {
+    if (n >= v) {
+      parts.push(`${under1000(Math.floor(n / v))} ${name}`);
+      n %= v;
+    }
+  }
+  if (n) parts.push(under1000(n));
+  return parts.join(" ");
+}
+
+/** "Rupees One Hundred and Twenty Five Thousand and Cents Fifty Only". */
+export function amountInWords(v: Parameters<typeof D>[0]): string {
+  const [i, c] = D(v).abs().toFixed(2).split(".");
+  const cents = Number(c);
+  return `Rupees ${intToWords(Number(i))}${cents ? ` and Cents ${intToWords(cents)}` : ""} Only`;
+}
+
+function signatureLines(doc: Doc, left: string, right: string) {
+  doc.ensure(70);
+  doc.y -= 50;
+  const sigW = 180;
+  doc.page.drawLine({ start: { x: M, y: doc.y }, end: { x: M + sigW, y: doc.y }, thickness: 0.75, color: INK });
+  doc.page.drawLine({ start: { x: W - M - sigW, y: doc.y }, end: { x: W - M, y: doc.y }, thickness: 0.75, color: INK });
+  doc.text(left, M, doc.y - 12, { size: 8.5, color: MUTED });
+  doc.text(right, W - M - sigW, doc.y - 12, { size: 8.5, color: MUTED });
+}
+
+// ─────────────────────────── Payment receipt ───────────────────────────
+/** Receipt handed to the client for one payment (RC-xxx), showing what is left to pay. */
+export async function renderReceiptPdf(
+  project: Project,
+  customer: Customer,
+  items: QuotationItem[],
+  payment: ClientPayment,
+  invoicesAll: Invoice[],
+  payments: ClientPayment[],
+) {
+  const t = contractTotals(project, items);
+  const isRefund = payment.paymentType === "REFUND";
+  const amount = D(payment.amount).abs();
+  const invoice = payment.invoiceId ? invoicesAll.find((i) => i.id === payment.invoiceId) : undefined;
+  // Everything received up to and including this receipt (same-day receipts ordered by code).
+  const upTo = payments.filter(
+    (p) => p.paymentDate < payment.paymentDate || (p.paymentDate === payment.paymentDate && p.receiptCode <= payment.receiptCode),
+  );
+  const receivedToDate = sum(upTo, (p) => p.amount);
+  const receivedBefore = receivedToDate.minus(D(payment.amount));
+
+  const doc = await Doc.create(`${payment.receiptCode} - ${project.title}`);
+  doc.letterhead(isRefund ? "REFUND VOUCHER" : "PAYMENT RECEIPT", [
+    ["Receipt No.", `${project.quotationNumber}/${payment.receiptCode}`],
+    ["Date", formatDate(payment.paymentDate)],
+    ["Method", PAYMENT_METHOD_LABELS[payment.paymentMethod]],
+    ...(payment.referenceNo ? ([["Reference", payment.referenceNo]] as [string, string][]) : []),
+    ...(invoice ? ([["Against invoice", invoice.invoiceNumber]] as [string, string][]) : []),
+  ]);
+  doc.partyBlock(customer, project);
+
+  const what = isRefund
+    ? `Refund paid to ${customer.name} for ${project.title} (Quotation ${project.quotationNumber}).`
+    : `Received with thanks from ${customer.name} towards the ${PAYMENT_TYPE_LABELS[payment.paymentType].toLowerCase()} payment for ${project.title} (Quotation ${project.quotationNumber})${invoice ? `, against invoice ${invoice.invoiceNumber}` : ""}.`;
+  doc.y -= 8;
+  doc.table(
+    [
+      { header: "Description", width: CONTENT_W - 120 },
+      { header: "Amount (Rs.)", width: 120, align: "right" },
+    ],
+    [
+      { cells: [what + (payment.notes ? `\n${payment.notes}` : ""), formatLKR(amount, { prefix: false })] },
+      { cells: [isRefund ? "Amount refunded" : "Amount received", formatLKR(amount, { prefix: false })], bold: true, fill: true },
+    ],
+    9,
+  );
+  doc.y -= 4;
+  doc.paragraph(`Amount in words: ${amountInWords(amount)}.`, { size: 9, bold: true });
+
+  if (invoice) {
+    const paidOnInv = sum(
+      payments.filter((p) => p.invoiceId === invoice.id && upTo.includes(p)),
+      (p) => p.amount,
+    );
+    doc.heading(`Invoice ${invoice.invoiceNumber}`);
+    doc.totals([
+      { label: `${INVOICE_TYPE_LABELS[invoice.invoiceType]} amount`, value: formatLKR(invoice.amount) },
+      { label: "Paid on this invoice to date", value: less(paidOnInv) },
+      { label: "Invoice balance", value: formatLKR(D(invoice.amount).minus(paidOnInv)), bold: true, accent: true },
+    ]);
+  }
+
+  doc.heading("Contract account");
+  doc.totals([
+    { label: "Net Contract Value", value: formatLKR(t.net) },
+    { label: "Received before this receipt", value: less(receivedBefore) },
+    { label: isRefund ? "This refund" : "This receipt", value: isRefund ? formatLKR(amount) : less(amount) },
+    { label: "Total received to date", value: formatLKR(receivedToDate), bold: true },
+    { label: "BALANCE REMAINING ON CONTRACT", value: formatLKR(t.net.minus(receivedToDate)), bold: true, accent: true },
+  ]);
+
+  signatureLines(doc, `For ${COMPANY.name} (authorised signature)`, isRefund ? "Received by client" : "Cashier / accountant");
+  doc.y -= 24;
+  doc.paragraph(
+    payment.paymentMethod === "CHEQUE" ? "Cheque payments are subject to realisation. This is a computer-generated receipt." : "This is a computer-generated receipt.",
+    { size: 8, color: MUTED },
+  );
+  return doc.finish();
+}
+
+// ─────────────────────────── Statement of account ───────────────────────────
+/** Every invoice (debit) and receipt (credit) with a running balance owed by the client. */
+export async function renderStatementPdf(
+  project: Project,
+  customer: Customer,
+  items: QuotationItem[],
+  invoicesAll: Invoice[],
+  payments: ClientPayment[],
+  asOf: string,
+) {
+  const t = contractTotals(project, items);
+  const issued = invoicesAll.filter((i) => i.status !== "DRAFT");
+  type Line = { date: string; ref: string; desc: string; debit: Decimal; credit: Decimal; order: number };
+  const lines: Line[] = [
+    ...issued.map((i) => ({ date: i.issueDate, ref: i.invoiceNumber, desc: INVOICE_TYPE_LABELS[i.invoiceType], debit: D(i.amount), credit: D(0), order: 0 })),
+    ...payments.map((p) => ({
+      date: p.paymentDate,
+      ref: p.receiptCode,
+      desc: `${p.paymentType === "REFUND" ? "Refund" : "Payment received"} (${PAYMENT_METHOD_LABELS[p.paymentMethod]}${p.referenceNo ? ` ${p.referenceNo}` : ""})`,
+      debit: D(0),
+      credit: D(p.amount),
+      order: 1,
+    })),
+  ].sort((a, b) => a.date.localeCompare(b.date) || a.order - b.order || a.ref.localeCompare(b.ref));
+
+  const doc = await Doc.create(`Statement of account - ${project.title}`);
+  doc.letterhead("STATEMENT OF ACCOUNT", [
+    ["As of", formatDate(asOf)],
+    ["Quotation ref.", project.quotationNumber],
+    ["Customer ID", customer.customerCode],
+  ]);
+  doc.partyBlock(customer, project);
+
+  let bal = D(0);
+  const rows: CellRow[] = lines.map((l) => {
+    bal = bal.plus(l.debit).minus(l.credit);
+    return {
+      cells: [
+        formatDate(l.date),
+        l.ref,
+        l.desc,
+        l.debit.isZero() ? "" : formatLKR(l.debit, { prefix: false }),
+        l.credit.isZero() ? "" : formatLKR(l.credit, { prefix: false }),
+        formatLKR(bal, { prefix: false }),
+      ],
+    };
+  });
+  const invoiced = sum(issued, (i) => i.amount);
+  const received = sum(payments, (p) => p.amount);
+  rows.push({ cells: ["", "", "Totals", formatLKR(invoiced, { prefix: false }), formatLKR(received, { prefix: false }), formatLKR(bal, { prefix: false })], bold: true, fill: true });
+  doc.y -= 8;
+  doc.table(
+    [
+      { header: "Date", width: 62 },
+      { header: "Ref", width: 88 },
+      { header: "Description", width: CONTENT_W - 62 - 88 - 3 * 74 },
+      { header: "Invoiced", width: 74, align: "right" },
+      { header: "Paid", width: 74, align: "right" },
+      { header: "Balance", width: 74, align: "right" },
+    ],
+    rows,
+    8,
+  );
+
+  doc.heading("Summary");
+  doc.totals([
+    { label: "Net Contract Value", value: formatLKR(t.net) },
+    { label: "Total invoiced", value: formatLKR(invoiced) },
+    { label: "Total received", value: less(received) },
+    { label: "AMOUNT DUE ON INVOICES", value: formatLKR(invoiced.minus(received)), bold: true, accent: true },
+    { label: "Remaining contract balance (incl. not yet invoiced)", value: formatLKR(t.net.minus(received)) },
+  ]);
+  doc.bankBlock(project);
+  doc.y -= 10;
+  doc.paragraph("This is a computer-generated statement. Draft invoices are not included.", { size: 8, color: MUTED });
   return doc.finish();
 }

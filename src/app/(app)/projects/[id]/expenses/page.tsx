@@ -1,5 +1,6 @@
 import { Suspense } from "react";
-import { AlertTriangle, Banknote, History, Pencil, Plus, Trash2, Truck, Undo2, Wallet } from "lucide-react";
+import Link from "next/link";
+import { AlertTriangle, Banknote, History, Pencil, Plus, SlidersHorizontal, Trash2, Truck, Undo2, Wallet, X } from "lucide-react";
 import {
   attachExpenseBill,
   createExpense,
@@ -12,29 +13,42 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { AttachmentLink } from "@/components/attachment-link";
 import { CostTypeField } from "@/components/cost-type-field";
 import { AttachButton, FileUploadField } from "@/components/file-upload";
-import { KpiCard } from "@/components/kpi-card";
+import { KpiCard, Progress } from "@/components/kpi-card";
 import { Money } from "@/components/money";
 import { Callout, EmptyState, PageSkeleton } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Drawer } from "@/components/ui/drawer";
 import { Field, Input, Select } from "@/components/ui/form";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { paymentMethodEnum, type CostType, type Expense, type QuotationItem } from "@/db/schema";
+import { costTypeEnum, paymentMethodEnum, type CostType, type Expense, type QuotationItem } from "@/db/schema";
 import { COST_TYPE_LABELS, OVERHEAD_CATEGORIES, PAYMENT_METHOD_LABELS } from "@/lib/constants";
 import { requireUser } from "@/lib/dal";
 import { bySort, projectSummary } from "@/lib/finance";
-import { D } from "@/lib/money";
+import {
+  applyExpenseFilter,
+  costTypeName,
+  groupExpenses,
+  isFiltered,
+  parseExpenseFilter,
+  payeeOf,
+  type ExpenseFilter,
+  type Group,
+} from "@/lib/expense-filter";
+import { D, sum } from "@/lib/money";
 import { getExpenseLists, getExpensePayments, requireProjectData } from "@/lib/queries";
 import { can } from "@/lib/rbac";
-import { formatDate, todayLK } from "@/lib/utils";
+import { cn, formatDate, todayLK } from "@/lib/utils";
 
 export const metadata = { title: "Expense Ledger" };
 
-export default function ExpensesPage({ params }: { params: Promise<{ id: string }> }) {
+type SP = Promise<Record<string, string | string[] | undefined>>;
+
+export default function ExpensesPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: SP }) {
   return (
     <Suspense fallback={<PageSkeleton />}>
-      <ExpensesContent params={params} />
+      <ExpensesContent params={params} searchParams={searchParams} />
     </Suspense>
   );
 }
@@ -72,9 +86,10 @@ function AllocationFields({ items, lists, e }: { items: QuotationItem[]; lists: 
   );
 }
 
-async function ExpensesContent({ params }: { params: Promise<{ id: string }> }) {
+async function ExpensesContent({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: SP }) {
   const user = await requireUser();
   const { id } = await params;
+  const filter = parseExpenseFilter(await searchParams);
   const data = await requireProjectData(id);
   const today = todayLK();
   const s = projectSummary(data, today);
@@ -90,6 +105,23 @@ async function ExpensesContent({ params }: { params: Promise<{ id: string }> }) 
   };
   const canEdit = can(user.role, "manageExpenses");
   const canDelete = can(user.role, "deleteFinancialRecords");
+
+  const shown = applyExpenseFilter(data.expenses, filter, today);
+  const filtered = isFiltered(filter);
+  const shownIncurred = sum(shown, (e) => e.totalCost);
+  const shownPaid = sum(shown, (e) => e.paidToDate);
+  const byType = groupExpenses(data.expenses, costTypeName);
+  const byPayee = groupExpenses(shown, payeeOf).slice(0, 12);
+  const byCategory = groupExpenses(shown, (e) => e.workCategory).slice(0, 12);
+  const usedCategories = [...new Set(data.expenses.map((e) => e.workCategory))].sort();
+  const usedLabels = [...new Set(data.expenses.map(costTypeName))].sort();
+  const base = `/projects/${id}/expenses`;
+  const hrefWith = (patch: Partial<ExpenseFilter>) => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries({ ...filter, ...patch })) if (v) qs.set(k, v);
+    const str = qs.toString();
+    return str ? `${base}?${str}` : base;
+  };
 
   return (
     <div className="space-y-6">
@@ -116,8 +148,118 @@ async function ExpensesContent({ params }: { params: Promise<{ id: string }> }) 
       <Card>
         <CardHeader>
           <div>
+            <CardTitle>Where the money goes, by cost type</CardTitle>
+            <CardDescription>Click a type to filter the ledger, e.g. Labour to see what was paid for labour charges.</CardDescription>
+          </div>
+        </CardHeader>
+        {byType.length === 0 ? (
+          <CardContent><p className="text-sm text-muted-foreground">No expenses yet.</p></CardContent>
+        ) : (
+          <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {byType.map((g) => {
+              const share = s.cash.totalIncurred.isZero() ? 0 : g.incurred.dividedBy(s.cash.totalIncurred).times(100).toNumber();
+              const active = filter.type === `label:${g.key}`;
+              return (
+                <Link
+                  key={g.key}
+                  href={hrefWith({ type: active ? undefined : `label:${g.key}` })}
+                  className={cn("rounded-lg border p-3 transition-colors hover:border-accent", active ? "border-accent bg-accent-soft/50" : "border-border")}
+                >
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-sm font-medium">{g.key}</span>
+                    <span className="text-xs text-muted-foreground tabular-nums">{share.toFixed(1)}% · {g.count} entr{g.count === 1 ? "y" : "ies"}</span>
+                  </div>
+                  <p className="mt-1 text-lg font-semibold"><Money value={g.incurred} /></p>
+                  <Progress value={share} tone={active ? "warn" : "info"} className="mt-2" />
+                  <p className="mt-1.5 text-xs text-muted-foreground">
+                    Paid <Money value={g.paid} /> · Unpaid <Money value={g.unpaid} />
+                  </p>
+                </Link>
+              );
+            })}
+          </CardContent>
+        )}
+      </Card>
+
+      <Card>
+        <form method="get" className="flex flex-wrap items-end gap-3 px-5 py-4">
+          <Field label="Cost type">
+            <Select name="type" defaultValue={filter.type ?? ""} className="w-48">
+              <option value="">All types</option>
+              <optgroup label="Counts as (incl. custom types)">
+                {costTypeEnum.enumValues.map((t) => (
+                  <option key={t} value={`base:${t}`}>All {COST_TYPE_LABELS[t].toLowerCase()} costs</option>
+                ))}
+              </optgroup>
+              <optgroup label="Exact type">
+                {usedLabels.map((l) => (
+                  <option key={l} value={`label:${l}`}>{l}</option>
+                ))}
+              </optgroup>
+            </Select>
+          </Field>
+          <Field label="Work category">
+            <Select name="category" defaultValue={filter.category ?? ""} className="w-44">
+              <option value="">All categories</option>
+              {usedCategories.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="BOQ item">
+            <Select name="item" defaultValue={filter.item ?? ""} className="w-44">
+              <option value="">All items</option>
+              <option value="UNALLOCATED">Unallocated only</option>
+              {allItems.map((i) => (
+                <option key={i.id} value={i.id}>{i.itemCode} · {i.description.slice(0, 30)}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Payment status">
+            <Select name="status" defaultValue={filter.status ?? ""} className="w-36">
+              <option value="">Any</option>
+              <option value="paid">Fully paid</option>
+              <option value="unpaid">Unpaid balance</option>
+              <option value="overdue">Overdue</option>
+            </Select>
+          </Field>
+          <Field label="From">
+            <Input type="date" name="from" defaultValue={filter.from ?? ""} className="w-38" />
+          </Field>
+          <Field label="To">
+            <Input type="date" name="to" defaultValue={filter.to ?? ""} className="w-38" />
+          </Field>
+          <Field label="Vendor / worker / ref">
+            <Input name="q" defaultValue={filter.q ?? ""} placeholder="Search…" className="w-44" />
+          </Field>
+          <button className={buttonVariants({ variant: "outline", size: "sm" })}><SlidersHorizontal /> Apply</button>
+          {filtered && <Link href={base} className={buttonVariants({ variant: "ghost", size: "sm" })}><X /> Clear</Link>}
+        </form>
+        {filtered && (
+          <div className="border-t border-border bg-muted/30 px-5 py-4">
+            <div className="grid gap-3 sm:grid-cols-4">
+              <Stat label="Matching entries" value={String(shown.length)} />
+              <Stat label="Incurred" value={<Money value={shownIncurred} />} />
+              <Stat label="Paid out" value={<Money value={shownPaid} />} />
+              <Stat label="Still to pay" value={<Money value={shownIncurred.minus(shownPaid)} />} />
+            </div>
+            {shown.length > 0 && (
+              <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                <Breakdown title="By vendor / worker" hint="Grouped by the name before the first “:” in Vendor / details" rows={byPayee} />
+                <Breakdown title="By work category" rows={byCategory} />
+              </div>
+            )}
+          </div>
+        )}
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div>
             <CardTitle>Expense ledger</CardTitle>
-            <CardDescription>Supplier invoices, labour and site expenses (EX-xxx)</CardDescription>
+            <CardDescription>
+              {filtered ? `Showing ${shown.length} of ${data.expenses.length} entries (filtered)` : "Supplier invoices, labour and site expenses (EX-xxx)"}
+            </CardDescription>
           </div>
           {canEdit && (
             <Drawer trigger={<><Plus /> Record expense</>} triggerVariant="accent" title="Record expense / bill" description="Enter the full bill amount once; log part-payments later with Pay.">
@@ -159,9 +301,13 @@ async function ExpensesContent({ params }: { params: Promise<{ id: string }> }) 
             </Drawer>
           )}
         </CardHeader>
-        {data.expenses.length === 0 ? (
+        {shown.length === 0 ? (
           <CardContent>
-            <EmptyState title="No expenses recorded">Use &ldquo;Record expense&rdquo; for each supplier bill, wage payment or site cost.</EmptyState>
+            {filtered ? (
+              <EmptyState title="No expenses match the filter">Change or clear the filter above.</EmptyState>
+            ) : (
+              <EmptyState title="No expenses recorded">Use &ldquo;Record expense&rdquo; for each supplier bill, wage payment or site cost.</EmptyState>
+            )}
           </CardContent>
         ) : (
           <Table>
@@ -177,7 +323,7 @@ async function ExpensesContent({ params }: { params: Promise<{ id: string }> }) 
               </TR>
             </THead>
             <TBody>
-              {data.expenses.map((e) => {
+              {shown.map((e) => {
                 const unpaid = D(e.totalCost).minus(D(e.paidToDate));
                 const overdue = unpaid.greaterThan(0) && e.dueDate && e.dueDate < today;
                 const item = e.quotationItemId ? itemsById.get(e.quotationItemId) : null;
@@ -302,10 +448,10 @@ async function ExpensesContent({ params }: { params: Promise<{ id: string }> }) 
                 );
               })}
               <TR className="bg-muted/60 font-semibold">
-                <TD colSpan={3}>Totals</TD>
-                <TD className="num"><Money value={s.cash.totalIncurred} prefix={false} /></TD>
-                <TD className="num"><Money value={s.cash.totalPaidCosts} prefix={false} /></TD>
-                <TD className="num"><Money value={s.cash.accountsPayable} prefix={false} /></TD>
+                <TD colSpan={3}>{filtered ? "Totals (filtered)" : "Totals"}</TD>
+                <TD className="num"><Money value={shownIncurred} prefix={false} /></TD>
+                <TD className="num"><Money value={shownPaid} prefix={false} /></TD>
+                <TD className="num"><Money value={shownIncurred.minus(shownPaid)} prefix={false} /></TD>
                 <TD />
               </TR>
             </TBody>
@@ -313,6 +459,37 @@ async function ExpensesContent({ params }: { params: Promise<{ id: string }> }) 
         )}
       </Card>
 
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div>
+      <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{label}</p>
+      <p className="mt-0.5 text-lg font-semibold tabular-nums">{value}</p>
+    </div>
+  );
+}
+
+function Breakdown({ title, hint, rows }: { title: string; hint?: string; rows: Group[] }) {
+  const max = rows[0]?.incurred.toNumber() || 1;
+  return (
+    <div className="rounded-lg border border-border bg-card p-3">
+      <p className="text-sm font-semibold">{title}</p>
+      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+      <ul className="mt-2 space-y-2">
+        {rows.map((r) => (
+          <li key={r.key}>
+            <div className="flex items-baseline justify-between gap-3 text-sm">
+              <span className="truncate">{r.key} <span className="text-xs text-muted-foreground">×{r.count}</span></span>
+              <Money value={r.incurred} className="shrink-0 font-medium" />
+            </div>
+            <Progress value={(r.incurred.toNumber() / max) * 100} tone="info" className="mt-1" />
+            {!r.unpaid.isZero() && <p className="mt-0.5 text-xs text-muted-foreground">Unpaid <Money value={r.unpaid} /></p>}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

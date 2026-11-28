@@ -63,4 +63,8 @@ export const COST_TYPE_HELP: Record<CostType, string> = {
   ASSET: "Hardware the company keeps, deducted from profit",
 };
 
+export const INVENTORY_CATEGORIES = ["Paint & Chemicals", "Electrical", "Hardware", "Timber & Boards", "Flooring", "Plumbing", "Tools", "General"] as const;
+
+export const STOCK_MOVEMENT_LABELS = { IN: "Stock in", OUT: "Issued to site", ADJUST: "Adjustment" } as const;
+
 export const LOAN_RECOVERY_LABELS = { WAGE_DEDUCTION: "Deducted from wages", CASH: "Repaid in cash" } as const;

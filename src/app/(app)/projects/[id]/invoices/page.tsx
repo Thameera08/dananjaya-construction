@@ -186,8 +186,12 @@ async function InvoicesContent({ params }: { params: Promise<{ id: string }> }) 
         <CardHeader>
           <div>
             <CardTitle>Client receipts ledger</CardTitle>
-            <CardDescription>Every incoming payment (RC-xxx). Refunds are recorded as negative receipts.</CardDescription>
+            <CardDescription>Every incoming payment (RC-xxx). Download a receipt PDF for the client after each payment.</CardDescription>
           </div>
+          <div className="flex flex-wrap gap-2">
+          <a href={`/api/projects/${id}/statement-pdf`} target="_blank" rel="noopener" className={buttonVariants({ variant: "outline", size: "sm" })}>
+            <FileText /> Statement of account PDF
+          </a>
           {canReceipt && (
             <Drawer trigger={<><HandCoins /> Record payment</>} triggerVariant="accent" title="Record client payment" description="Creates the next RC-xxx receipt. Attach the bank slip if you have it.">
               <ActionForm action={createPayment.bind(null, id)} className="grid gap-4 sm:grid-cols-2">
@@ -236,6 +240,7 @@ async function InvoicesContent({ params }: { params: Promise<{ id: string }> }) 
               </ActionForm>
             </Drawer>
           )}
+          </div>
         </CardHeader>
         {data.payments.length === 0 ? (
           <CardContent>
@@ -254,6 +259,7 @@ async function InvoicesContent({ params }: { params: Promise<{ id: string }> }) 
                 <TH>Invoice</TH>
                 <TH>Slip</TH>
                 <TH>Notes</TH>
+                <TH className="text-right">Receipt</TH>
                 {canDelete && <TH />}
               </TR>
             </THead>
@@ -277,6 +283,11 @@ async function InvoicesContent({ params }: { params: Promise<{ id: string }> }) 
                     )}
                   </TD>
                   <TD className="max-w-56 text-xs text-muted-foreground">{p.notes}</TD>
+                  <TD className="text-right">
+                    <a href={`/api/projects/${id}/receipt-pdf?paymentId=${p.id}`} target="_blank" rel="noopener" className={buttonVariants({ variant: "ghost", size: "xs" })} title={`Download receipt ${p.receiptCode} for the client`}>
+                      <Download /> PDF
+                    </a>
+                  </TD>
                   {canDelete && (
                     <TD>
                       <ActionForm action={deletePayment.bind(null, p.id)} compact confirm={`Delete receipt ${p.receiptCode}? This changes the client balance.`}>
@@ -289,7 +300,7 @@ async function InvoicesContent({ params }: { params: Promise<{ id: string }> }) 
               <TR className="bg-muted/60 font-semibold">
                 <TD colSpan={3}>Total received</TD>
                 <TD className="num"><Money value={s.collections.totalReceived} prefix={false} /></TD>
-                <TD colSpan={canDelete ? 6 : 5} />
+                <TD colSpan={canDelete ? 7 : 6} />
               </TR>
             </TBody>
           </Table>
